@@ -1041,20 +1041,47 @@ async function processMessage(msg, env) {
       // 🆕 Mostrar transcripción al usuario para debugging
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, `🎤 <b>Transcribí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n⏳ Procesando...`);
       
-      // Procesar el texto transcrito como si fuera un mensaje normal
+      // Procesar el texto transcrito
       try {
+        // Normalizar el texto transcrito
+        const textoNormalizado = normalizarTextoAvanzado(textoTranscrito);
+        
+        // Intentar con regex primero
+        const tiempoRelativo = detectarTiempoRelativo(textoNormalizado);
+        if (tiempoRelativo) {
+          // El regex lo detectó, procesar normalmente
+          const msgSimulado = {
+            ...msg,
+            text: textoTranscrito,
+            voice: undefined
+          };
+          await processMessage(msgSimulado, env);
+          return;
+        }
+        
+        // Si regex no detectó, intentar con IA
+        const datos = await interpretarAlarmaConIA(textoNormalizado, env.AI);
+        
+        if (!datos || !datos.esAlarma) {
+          // IA no entendió el texto
+          await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+            `❌ <b>No entendí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n💡 <b>Sugerencia:</b> Intenta:\n• Una frase más simple\n• Ejemplo: "alarma mañana a las 10"\n• O escríbelo en su lugar`
+          );
+          return;
+        }
+        
+        // IA entendió, procesar normalmente
         const msgSimulado = {
           ...msg,
           text: textoTranscrito,
           voice: undefined
         };
-        
-        // Procesar recursivamente
         await processMessage(msgSimulado, env);
+        
       } catch (processingError) {
         console.error("💥 Error procesando transcripción:", processingError);
         await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
-          `❌ <b>No pude procesar:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n💡 <b>Sugerencia:</b>\n• Intenta con una frase más simple\n• O escríbelo en su lugar`
+          `❌ <b>Error procesando:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n💡 <b>Sugerencia:</b>\n• Intenta con una frase más simple\n• O escríbelo en su lugar`
         );
       }
       return;
