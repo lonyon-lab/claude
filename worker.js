@@ -516,11 +516,21 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     
     console.log("✅ Total alarmas después de guardar:", alarmas.length); // 🆕 Debug
 
+    // Para múltiples alarmas, crear botones para cada una
     const resumen = nuevas.map(a =>
       `📅 <b>${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`
     ).join('\n');
-    await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
-      `✅ <b>¡${nuevas.length} alarmas guardadas!</b>\n\n${resumen}\n📝 <i>${escapeHTML(nuevas[0].nota)}</i>`
+    
+    // 🆕 Botones para editar cada alarma
+    const botones = nuevas.map(a => [{ 
+      text: `✏️ Editar "${a.nota.substring(0, 20)}${a.nota.length > 20 ? '...' : ''}"`, 
+      callback_data: `editar_desc_nueva:${a.id}` 
+    }]);
+    
+    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+      `✅ <b>¡${nuevas.length} alarmas guardadas!</b>\n\n${resumen}\n📝 <i>${escapeHTML(nuevas[0].nota)}</i>`,
+      botones,
+      msgId
     );
     return;
   }
@@ -984,9 +994,11 @@ async function guardarNotaYFinalizar(env, chatId, messageId, nota) {
   const resumen = config.tipo === "semanal"
     ? `🔄 Todos los <b>${nombresDias[config.diaSemana]}</b>`
     : `📅 El <b>${config.diaMes} de ${NOMBRES_MESES[config.mes - 1]}</b>`;
+  
+  // 🆕 Editar mensaje original y agregar botón de editar
   await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
     `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n📝 <i>${escapeHTML(config.nota)}</i>`,
-    null
+    [[{ text: "✏️ Editar descripción", callback_data: `editar_desc_nueva:${config.id}` }]]
   );
 }
 
