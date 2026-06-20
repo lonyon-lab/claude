@@ -20,6 +20,7 @@ const FOTO_POR_DEFECTO = "https://images.unsplash.com/photo-1579546929518-9e396f
 const NOMBRES_MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_POR_MES  = [31,28,31,30,31,30,31,31,30,31,30,31];
 const CLAVE_ALARMAS = "alarmas";
+const NOMBRES_DIAS  = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
 
 const PALABRAS_TIEMPO = [
   "lunes","martes","miércoles","miercoles","jueves","viernes","sábado","sabado","domingo",
@@ -583,6 +584,98 @@ function calcularCuentaAtras(alarma) {
   return `⏳ <b>Faltan ${texto}</b>`;
 }
 
+// ─── 🆕 HELPERS DE VISTA (Opción A: menú interactivo en un solo mensaje) ───────
+// Cuenta atrás en formato corto para la lista: "1d 19h" / "5h 10m" / "3m" / "¡ya!"
+function cuentaAtrasCorta(alarma) {
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const hh = parseInt(alarma.hora), mm = parseInt(alarma.minuto);
+  let target;
+  if (alarma.tipo === "semanal") {
+    target = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), hh, mm, 0, 0);
+    let diff = (Number(alarma.diaSemana) - ahora.getDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= ahora.getTime()) diff = 7;
+    target.setDate(target.getDate() + diff);
+  } else {
+    target = new Date(ahora.getFullYear(), Number(alarma.mes) - 1, Number(alarma.diaMes), hh, mm, 0, 0);
+    if (target.getTime() < ahora.getTime()) target.setFullYear(target.getFullYear() + 1);
+  }
+  const totalMin = Math.round((target.getTime() - ahora.getTime()) / 60000);
+  if (totalMin <= 0) return "¡ya!";
+  const d = Math.floor(totalMin / 1440), h = Math.floor((totalMin % 1440) / 60), m = totalMin % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// Texto de fecha de una alarma (para la ficha de detalle)
+function nombreFechaAlarma(al) {
+  if (al.tipo === "semanal") return `🔄 Todos los <b>${NOMBRES_DIAS[al.diaSemana]}</b>`;
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+  if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
+  return `📅 <b>${NOMBRES_DIAS[fecha.getDay()]} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
+}
+
+// Ordena: únicas por proximidad y luego las semanales
+function ordenarAlarmas(alarmas) {
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const unicas = alarmas.filter(a => a.tipo === "unica").sort((a, b) => {
+    const fa = new Date(ahora.getFullYear(), a.mes - 1, a.diaMes, parseInt(a.hora), parseInt(a.minuto));
+    const fb = new Date(ahora.getFullYear(), b.mes - 1, b.diaMes, parseInt(b.hora), parseInt(b.minuto));
+    if (fa < ahora) fa.setFullYear(fa.getFullYear() + 1);
+    if (fb < ahora) fb.setFullYear(fb.getFullYear() + 1);
+    return fa - fb;
+  });
+  const semanales = alarmas.filter(a => a.tipo === "semanal");
+  return [...unicas, ...semanales];
+}
+
+// Construye la vista de LISTA: texto compacto numerado + teclado de números
+function construirVistaLista(alarmas, pagina = 0) {
+  const PAGE = 10;
+  const ordenadas = ordenarAlarmas(alarmas);
+  const totalPag = Math.max(1, Math.ceil(ordenadas.length / PAGE));
+  pagina = Math.max(0, Math.min(pagina, totalPag - 1));
+  const slice = ordenadas.slice(pagina * PAGE, pagina * PAGE + PAGE);
+
+  let texto = `📋 <b>TUS ALARMAS</b> (${alarmas.length})`;
+  if (totalPag > 1) texto += ` · pág. ${pagina + 1}/${totalPag}`;
+  texto += `\n👇 Pulsa el <b>número</b> para gestionarla.\n`;
+
+  const teclado = [];
+  let fila = [];
+  slice.forEach((al, i) => {
+    const n = pagina * PAGE + i + 1;
+    const fechaCorta = al.tipo === "semanal"
+      ? NOMBRES_DIAS[al.diaSemana].slice(0, 3)
+      : `${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)}`;
+    const nota = al.nota.length > 28 ? al.nota.slice(0, 28) + "…" : al.nota;
+    texto += `\n<b>${n}.</b> ${fechaCorta} · <b>${al.hora}:${al.minuto}</b> · ⏳${cuentaAtrasCorta(al)} · ${escapeHTML(nota)}`;
+    fila.push({ text: `${n}`, callback_data: `alarma_ver:${al.id}` });
+    if (fila.length === 5) { teclado.push(fila); fila = []; }
+  });
+  if (fila.length) teclado.push(fila);
+
+  const nav = [];
+  if (pagina > 0) nav.push({ text: "◀️", callback_data: `lista:${pagina - 1}` });
+  nav.push({ text: "🔄", callback_data: `lista:${pagina}` });
+  if (pagina < totalPag - 1) nav.push({ text: "▶️", callback_data: `lista:${pagina + 1}` });
+  teclado.push(nav);
+  teclado.push([{ text: "🔍 Buscar", callback_data: "buscar_alarma" }]);
+
+  return { texto, teclado };
+}
+
+// Construye la vista de FICHA (detalle de una alarma) + acciones
+function construirFichaAlarma(alarma, prefijo = "") {
+  const texto = `${prefijo}${nombreFechaAlarma(alarma)} a las <b>${alarma.hora}:${alarma.minuto}</b>\n${calcularCuentaAtras(alarma)}\n📝 <i>${escapeHTML(alarma.nota)}</i>`;
+  const teclado = [
+    [{ text: "✏️ Editar nota", callback_data: `editar_nota:${alarma.id}` }, { text: "🕐 Hora/Fecha", callback_data: `editar_fecha:${alarma.id}` }],
+    [{ text: "🗑️ Borrar", callback_data: `preguntar_borrar:${alarma.id}` }, { text: "◀️ Lista", callback_data: `lista:0` }]
+  ];
+  return { texto, teclado };
+}
+
 // ─── GUARDAR ALARMA DESDE IA ──────────────────────────────────────────────────
 async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   const alarmas = await leerAlarmas(env);
@@ -932,7 +1025,11 @@ async function handleCallback(cb, env) {
   }
   else if (data.startsWith("set_dia_sem:")) {
     const dia = data.split(":")[1];
-    await env.ALARMAS_KV.put(`temp_${chatId}`, JSON.stringify({ tipo: "semanal", diaSemana: dia }));
+    // 🆕 Fusionar en vez de sobrescribir (preserva id/nota/editando al editar)
+    const config = await env.ALARMAS_KV.get(`temp_${chatId}`, { type: "json" }) || {};
+    config.tipo = "semanal";
+    config.diaSemana = dia;
+    await env.ALARMAS_KV.put(`temp_${chatId}`, JSON.stringify(config));
     await desplegarPanelHoras(env.TELEGRAM_TOKEN, chatId, messageId, false);
   }
   else if (data === "volver_a_fecha") {
@@ -973,6 +1070,35 @@ async function handleCallback(cb, env) {
     const config = await env.ALARMAS_KV.get(`temp_${chatId}`, { type: "json" });
     if (!config) return;
     config.minuto = minutoCompleto.toString().padStart(2,'0');
+
+    // 🆕 Modo edición: guardar sobre la alarma existente sin volver a pedir la nota
+    if (config.editando) {
+      const alarmas = await leerAlarmas(env);
+      const idx = alarmas.findIndex(a => a.id === config.id);
+      if (idx >= 0) {
+        const a = alarmas[idx];
+        a.tipo   = config.tipo;
+        a.hora   = config.hora;
+        a.minuto = config.minuto;
+        if (config.tipo === "unica") {
+          a.diaMes = config.diaMes; a.mes = config.mes;
+          delete a.diaSemana;
+        } else {
+          a.diaSemana = config.diaSemana;
+          delete a.diaMes; delete a.mes;
+        }
+        await guardarAlarmas(env, alarmas);
+        await env.ALARMAS_KV.delete(`temp_${chatId}`);
+        const vista = construirFichaAlarma(a, "✅ <b>¡Hora/fecha actualizada!</b>\n\n");
+        await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, vista.texto, vista.teclado);
+      } else {
+        await env.ALARMAS_KV.delete(`temp_${chatId}`);
+        await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ La alarma ya no existe.", [[{ text: "◀️ Lista", callback_data: "lista:0" }]]);
+      }
+      return;
+    }
+
+    // Creación (comportamiento original)
     config.id = Date.now().toString();
     config.nota = "Recordatorio sin nombre";
     config.fotoUrl = FOTO_POR_DEFECTO;
@@ -1029,8 +1155,7 @@ async function handleCallback(cb, env) {
     
     await guardarAlarmaDesdeIA(pendiente, env, chatId, messageId);
   }
-  else if (data === "franja:am" || data === "franja:pm") {
-    // 🆕 Resolver hora ambigua (am/pm) elegida por el usuario
+  else if (data === "franja:am" || data === "franja:pm") {    // 🆕 Resolver hora ambigua (am/pm) elegida por el usuario
     const pend = await env.ALARMAS_KV.get(`pendiente_franja:${chatId}`, { type: "json" });
     if (!pend) {
       await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ La operación expiró. Vuelve a escribir el recordatorio.", null);
@@ -1044,6 +1169,43 @@ async function handleCallback(cb, env) {
       diaMes: pend.diaMes, mes: pend.mes,
       hora, minuto: pend.minuto, nota: pend.nota
     }, env, chatId, messageId);
+  }
+  else if (data.startsWith("lista:")) {
+    // 🆕 Volver/refrescar/paginar la lista de alarmas (Opción A)
+    const pag = parseInt(data.split(":")[1]) || 0;
+    const alarmas = await leerAlarmas(env);
+    if (alarmas.length === 0) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "🤷‍♂️ No tienes ninguna alarma configurada.", null);
+      return;
+    }
+    const vista = construirVistaLista(alarmas, pag);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, vista.texto, vista.teclado);
+  }
+  else if (data.startsWith("alarma_ver:")) {
+    // 🆕 Ficha de detalle de una alarma
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const al = alarmas.find(a => a.id === id);
+    if (!al) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", [[{ text: "◀️ Lista", callback_data: "lista:0" }]]);
+      return;
+    }
+    const vista = construirFichaAlarma(al);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, vista.texto, vista.teclado);
+  }
+  else if (data.startsWith("editar_fecha:")) {
+    // 🆕 Editar hora/fecha reutilizando la botonera de fecha única / semanal
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const al = alarmas.find(a => a.id === id);
+    if (!al) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", [[{ text: "◀️ Lista", callback_data: "lista:0" }]]);
+      return;
+    }
+    // Cargar la alarma en el temporal con marca de edición (preserva id, nota, foto)
+    await env.ALARMAS_KV.put(`temp_${chatId}`, JSON.stringify({ ...al, editando: true }));
+    if (al.tipo === "semanal") await desplegarPanelDiasSemana(env.TELEGRAM_TOKEN, chatId, messageId);
+    else await desplegarPanelMeses(env.TELEGRAM_TOKEN, chatId, messageId);
   }
   else if (data.startsWith("preguntar_borrar:")) {
     const id      = data.split(":")[1];
@@ -1061,8 +1223,14 @@ async function handleCallback(cb, env) {
   else if (data.startsWith("confirmar_borrar:")) {
     const id = data.split(":")[1];
     const alarmas = await leerAlarmas(env);
-    await guardarAlarmas(env, alarmas.filter(a => a.id !== id));
-    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "🗑️ Alarma eliminada correctamente.", null);
+    const restantes = alarmas.filter(a => a.id !== id);
+    await guardarAlarmas(env, restantes);
+    if (restantes.length > 0) {
+      const vista = construirVistaLista(restantes, 0);
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, `🗑️ <b>Alarma eliminada.</b>\n\n${vista.texto}`, vista.teclado);
+    } else {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "🗑️ Alarma eliminada. Ya no tienes alarmas.", null);
+    }
   }
   else if (data === "cancelar_borrar") {
     await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Borrado cancelado. Usa /ver para listarlas de nuevo.", null);
@@ -1350,55 +1518,10 @@ async function processMessage(msg, env) {
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🤷‍♂️ No tienes ninguna alarma configurada.");
       return;
     }
-    
-    // 🆕 Ordenar y agrupar alarmas
-    const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
-    const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-    
-    // Separar semanales y únicas
-    const semanales = alarmas.filter(a => a.tipo === "semanal");
-    const unicas = alarmas.filter(a => a.tipo === "unica");
-    
-    // Ordenar únicas por proximidad
-    unicas.sort((a, b) => {
-      const fechaA = new Date(ahora.getFullYear(), a.mes - 1, a.diaMes, a.hora, a.minuto);
-      const fechaB = new Date(ahora.getFullYear(), b.mes - 1, b.diaMes, b.hora, b.minuto);
-      // Si la fecha ya pasó este año, considerar año siguiente
-      if (fechaA < ahora) fechaA.setFullYear(fechaA.getFullYear() + 1);
-      if (fechaB < ahora) fechaB.setFullYear(fechaB.getFullYear() + 1);
-      return fechaA.getTime() - fechaB.getTime();
-    });
-    
-    // 🆕 Mostrar cada alarma como tarjeta con cuenta atrás y botones de gestión
-    const ordenadas = [...unicas, ...semanales];
-    const limite = 20;
 
-    await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
-      `📋 <b>TUS ALARMAS</b> (${alarmas.length} total)\n👇 Pulsa <b>✏️</b> para editar la nota o <b>🗑️</b> para borrar.`);
-
-    for (const al of ordenadas.slice(0, limite)) {
-      let fechaTxt;
-      if (al.tipo === "semanal") {
-        fechaTxt = `🔄 Todos los <b>${nombresDias[al.diaSemana]}</b>`;
-      } else {
-        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
-        if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
-        fechaTxt = `📅 <b>${nombresDias[fecha.getDay()]} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
-      }
-      await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n${calcularCuentaAtras(al)}\n📝 <i>${escapeHTML(al.nota)}</i>`,
-        [[
-          { text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` },
-          { text: "🗑️ Borrar",      callback_data: `preguntar_borrar:${al.id}` }
-        ]]
-      );
-    }
-
-    if (ordenadas.length > limite) {
-      await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-        `<i>Mostrando ${limite} de ${alarmas.length} alarmas.</i>`,
-        [[{ text: "🔍 Buscar", callback_data: "buscar_alarma" }, { text: "📆 Por mes", callback_data: "ver_por_mes" }]]);
-    }
+    // 🆕 Opción A: un solo mensaje con lista compacta numerada + teclado
+    const vista = construirVistaLista(alarmas, 0);
+    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId, vista.texto, vista.teclado);
     return;
   }
 
