@@ -650,15 +650,16 @@ function construirVistaLista(alarmas, pagina = 0) {
     const emoji = KEYCAPS[i] || `${i + 1}`;
     let cabecera;
     if (al.tipo === "semanal") {
-      cabecera = `🔄 ${NOMBRES_DIAS[al.diaSemana].slice(0, 3)} ${al.hora}:${al.minuto}`;
+      cabecera = `🔄<b>${NOMBRES_DIAS[al.diaSemana].slice(0, 3)}</b> ⏰ ${al.hora}:${al.minuto}`;
     } else {
       const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
       if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
       const dia = NOMBRES_DIAS[fecha.getDay()].slice(0, 3);
-      cabecera = `${dia} ${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)} ${al.hora}:${al.minuto}`;
+      cabecera = `📅${dia} <b>${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)}</b> ⏰ ${al.hora}:${al.minuto}`;
     }
     texto += `\n\n${emoji} ${cabecera} · ⏳${cuentaAtrasCorta(al)} · ${escapeHTML(al.nota)}`;
-    fila.push({ text: emoji, callback_data: `alarma_ver:${al.id}` });
+    // Botonera con números normales (1, 2, 3…)
+    fila.push({ text: `${i + 1}`, callback_data: `alarma_ver:${al.id}` });
     if (fila.length === 5) { teclado.push(fila); fila = []; }
   });
   if (fila.length) teclado.push(fila);
