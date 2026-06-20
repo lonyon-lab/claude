@@ -1042,14 +1042,21 @@ async function processMessage(msg, env) {
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, `🎤 <b>Transcribí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n⏳ Procesando...`);
       
       // Procesar el texto transcrito como si fuera un mensaje normal
-      const msgSimulado = {
-        ...msg,
-        text: textoTranscrito,
-        voice: undefined
-      };
-      
-      // Procesar recursivamente
-      await processMessage(msgSimulado, env);
+      try {
+        const msgSimulado = {
+          ...msg,
+          text: textoTranscrito,
+          voice: undefined
+        };
+        
+        // Procesar recursivamente
+        await processMessage(msgSimulado, env);
+      } catch (processingError) {
+        console.error("💥 Error procesando transcripción:", processingError);
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+          `❌ <b>No pude procesar:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n💡 <b>Sugerencia:</b>\n• Intenta con una frase más simple\n• O escríbelo en su lugar`
+        );
+      }
       return;
       
     } catch (e) {
