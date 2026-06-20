@@ -379,6 +379,12 @@ function detectarTiempoRelativo(texto) {
     .replace(/dentr[oa]\s*e\s+/g, 'dentro de ')
     .replace(/dento\s+de\s+/g,    'dentro de ')
     .replace(/dentrode\s+/g,       'dentro de ')
+    // 🆕 Normalizar inglés → español
+    .replace(/\bminutes?\b/g,      'minutos')
+    .replace(/\bhours?\b/g,        'horas')
+    .replace(/\bdays?\b/g,         'dias')
+    .replace(/\bweeks?\b/g,        'semanas')
+    // Abreviaciones comunes
     .replace(/\bmins?\b/g,         'minutos')
     .replace(/\bh\b/g,             'hora')
     .replace(/\bhrs?\b/g,          'horas');
