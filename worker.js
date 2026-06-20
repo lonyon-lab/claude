@@ -549,8 +549,13 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   } else {
     fechaTxt = `📅 El <b>${datos.diaMes} de ${NOMBRES_MESES[Number(datos.mes) - 1]}</b>`;
   }
-  await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`
+  
+  // 🆕 Agregar botón de editar descripción
+  const botones = [[{ text: "✏️ Editar descripción", callback_data: `editar_desc_nueva:${alarma.id}` }]];
+  
+  await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
+    botones
   );
 }
 
@@ -869,6 +874,60 @@ async function handleCallback(cb, env) {
   else if (data.startsWith("editar_nota:")) {
     const id = data.split(":")[1];
     const alarmas = await leerAlarmas(env);
+    const alarma = alarmas.find(a => a.id === id);
+    if (!alarma) {
+      await answerCallback(cb);
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "⚠️ Alarma no encontrada.", null);
+      return;
+    }
+    
+    // Guardar en KV que estamos esperando una nueva nota para esta alarma
+    await env.ALARMAS_KV.put(`esperando_edicion_nota:${chatId}`, id);
+    
+    await answerCallback(cb);
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `✏️ <b>Editando nota de alarma</b>\n\n📝 Nota actual: <i>"${escapeHTML(alarma.nota)}"</i>\n\n💬 Escribe la nueva descripción:`,
+        parse_mode: 'HTML',
+        reply_markup: {
+          force_reply: true,
+          input_field_placeholder: "Nueva descripción..."
+        }
+      })
+    });
+  }
+  else if (data.startsWith("editar_desc_nueva:")) {
+    // 🆕 Editar descripción de alarma recién creada
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const alarma = alarmas.find(a => a.id === id);
+    if (!alarma) {
+      await answerCallback(cb);
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "⚠️ Alarma no encontrada.", null);
+      return;
+    }
+    
+    // Guardar en KV que estamos esperando una nueva nota para esta alarma
+    await env.ALARMAS_KV.put(`esperando_edicion_nota:${chatId}`, id);
+    
+    await answerCallback(cb);
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: `✏️ <b>Editando descripción</b>\n\n📝 Descripción actual: <i>"${escapeHTML(alarma.nota)}"</i>\n\n💬 Escribe la nueva descripción:`,
+        parse_mode: 'HTML',
+        reply_markup: {
+          force_reply: true,
+          input_field_placeholder: "Nueva descripción..."
+        }
+      })
+    });
+  }
     const alarma = alarmas.find(a => a.id === id);
     if (!alarma) {
       await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", null);
