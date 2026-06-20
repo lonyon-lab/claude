@@ -109,14 +109,16 @@ function normalizarTextoAvanzado(texto) {
     // Limpiar ", :XX" → ":XX" (cuando queda de "pero y cuarto")
     .replace(/,\s*:(\d{2})/g, ':$1')
     
-    // Detectar "a las X y Y" donde Y son minutos de 2 dígitos (10-59)
-    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})\b/gi, 'a las $1:$2')
+    // 🆕 MEJORADO: Detectar "a las X y Y" donde Y son minutos (más flexible)
+    // Primero 2 dígitos (10-59), debe estar seguido de espacio, coma, "y", o final
+    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})(?=\s|,|$|y)/gi, 'a las $1:$2')
     
-    // Detectar "a las X y Y" donde Y son minutos de 1 dígito (1-9)
-    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d)\b/gi, (match, h, m) => {
+    // Luego 1 dígito (01-09), solo si parece ser minutos
+    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d)(?=\s|,|$|y)/gi, (match, h, m) => {
+      const hora = parseInt(h);
       const minutos = parseInt(m);
-      // Solo si es 1-9 (no 10-23 que serían horas)
-      if (minutos >= 1 && minutos <= 9) {
+      // Solo si hora es razonable (0-23) y minuto es 1-9
+      if (hora >= 0 && hora <= 23 && minutos >= 1 && minutos <= 9) {
         return `a las ${h}:0${m}`;
       }
       return match;
