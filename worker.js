@@ -250,6 +250,9 @@ EJEMPLOS:
 "el 5 y el 6 de julio despertador a las 7"
 → {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"despertador","tipo":"unica","diaMes":5,"mes":7,"hora":"07","minuto":"00"},{"nota":"despertador","tipo":"unica","diaMes":6,"mes":7,"hora":"07","minuto":"00"}]}
 
+"el 1 de julio a las 11 y el día antes a las 8"
+→ {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"recordatorio","tipo":"unica","diaMes":1,"mes":7,"hora":"11","minuto":"00"},{"nota":"recordatorio","tipo":"unica","diaMes":1,"mes":7,"diasAntes":1,"hora":"08","minuto":"00"}]}
+
 REGLAS HORA:
 - Sin hora → contexto: médico/reunión→09:00, comida→12:00, gym→19:00, cena→21:00, defecto→10:00
 - "a las X y Y" donde Y≤59 → X:Y (hora y minutos)
@@ -258,12 +261,14 @@ REGLAS HORA:
 REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
 - "pasado mañana" → ${pasadoMananaNum}/${pasadoMananasMes}
+- "el día antes" → usa diasAntes:1 (ejemplo: "el 5... y el día antes" → alarma con diaMes:5 + alarma con diaMes:5,diasAntes:1)
 - Múltiples fechas → {"esAlarma":true,"multiple":true,"alarmas":[...]}
 
 FORMATO:
 Única: {"esAlarma":true,"nota":"...","tipo":"unica","diaMes":N,"mes":N,"hora":"HH","minuto":"MM"}
 Semanal: {"esAlarma":true,"nota":"...","tipo":"semanal","diaSemana":N,"hora":"HH","minuto":"MM"}
 Múltiple: {"esAlarma":true,"multiple":true,"alarmas":[...]}
+Con días antes: {"esAlarma":true,"nota":"...","tipo":"unica","diaMes":N,"mes":N,"diasAntes":1,"hora":"HH","minuto":"MM"}
 No alarma: {"esAlarma":false}`;
 
   try {
