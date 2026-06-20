@@ -255,7 +255,7 @@ EJEMPLOS:
 → {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"recordatorio","tipo":"unica","diaMes":1,"mes":7,"hora":"11","minuto":"00"},{"nota":"recordatorio","tipo":"unica","diaMes":1,"mes":7,"diasAntes":1,"hora":"08","minuto":"00"}]}
 
 "tengo boda dentro de 10 o 12 días, ponme alarma unos días antes"
-→ {"esAlarma":true,"nota":"boda","tipo":"unica","diaMes":2,"mes":7,"diasAntes":3,"hora":"10","minuto":"00"}
+→ {"esAlarma":true,"nota":"boda","tipo":"unica","diaMes":2,"mes":7,"diasAntes":-1,"diasAntesMin":3,"diasAntesMax":5,"hora":"10","minuto":"00"}
 
 REGLAS HORA:
 - Sin hora → contexto: médico/reunión→09:00, comida→12:00, gym→19:00, cena→21:00, defecto→10:00
@@ -266,9 +266,10 @@ REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
 - "pasado mañana" → ${pasadoMananaNum}/${pasadoMananasMes}
 - "dentro de X días" → calcular fecha sumando X días a hoy
-- "dentro de X o Y días" → elegir aleatoriamente entre X e Y, luego sumar a hoy
-- "el día antes" → usa diasAntes:1 (ejemplo: "el 5... y el día antes" → alarma con diaMes:5 + alarma con diaMes:5,diasAntes:1)
-- "unos días antes" → usa diasAntes:3 (2-3 días antes)
+- "dentro de X o Y días" → usar diasAntesMin:X, diasAntesMax:Y, diasAntes:-1 (código elegirá aleatorio)
+- "el día antes" → usa diasAntes:1
+- "unos días antes" → usa diasAntesMin:3, diasAntesMax:5, diasAntes:-1 (aleatorio 3-5 días)
+- "varios días antes" → usa diasAntesMin:5, diasAntesMax:7, diasAntes:-1 (aleatorio 5-7 días)
 - Múltiples fechas → {"esAlarma":true,"multiple":true,"alarmas":[...]}
 
 FORMATO:
