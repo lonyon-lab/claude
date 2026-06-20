@@ -885,6 +885,83 @@ async function handleCallback(cb, env) {
   else if (data === "cancelar_borrar") {
     await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Borrado cancelado. Usa /ver para listarlas de nuevo.", null);
   }
+  else if (data === "ver_todas") {
+    // 🆕 Ver todas las alarmas (sin límite)
+    const alarmas = await leerAlarmas(env);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "📋 <b>TODAS TUS ALARMAS:</b>", null);
+    
+    for (const al of alarmas) {
+      const fechaTxt = al.tipo === "semanal"
+        ? `🔄 Todos los <b>${nombresDias[al.diaSemana]}</b>`
+        : (() => {
+            const fecha = new Date(new Date().getFullYear(), al.mes - 1, al.diaMes);
+            const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
+            return `📅 El <b>${diaSemana} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
+          })();
+      await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n📝 <i>${escapeHTML(al.nota)}</i>`,
+        [
+          [{ text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` }],
+          [{ text: "❌ Borrar", callback_data: `preguntar_borrar:${al.id}` }]
+        ]
+      );
+    }
+  }
+  else if (data === "buscar_alarma") {
+    // 🆕 Buscar alarma
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
+      "🔍 <b>Buscar alarma</b>\n\nEscribe palabras clave para buscar en tus alarmas:",
+      [[{ text: "❌ Cancelar", callback_data: "cancelar_buscar" }]]
+    );
+    await env.ALARMAS_KV.put(`esperando_busqueda:${chatId}`, "1");
+  }
+  else if (data === "cancelar_buscar") {
+    await env.ALARMAS_KV.delete(`esperando_busqueda:${chatId}`);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Búsqueda cancelada.", null);
+  }
+  else if (data === "ver_por_mes") {
+    // 🆕 Ver alarmas agrupadas por mes
+    const alarmas = await leerAlarmas(env);
+    const unicas = alarmas.filter(a => a.tipo === "unica");
+    const semanales = alarmas.filter(a => a.tipo === "semanal");
+    
+    // Agrupar por mes
+    const porMes = {};
+    for (const al of unicas) {
+      const clave = `${al.mes}`;
+      if (!porMes[clave]) porMes[clave] = [];
+      porMes[clave].push(al);
+    }
+    
+    let mensaje = "📆 <b>ALARMAS POR MES:</b>\n";
+    const mesesOrdenados = Object.keys(porMes).sort((a, b) => parseInt(a) - parseInt(b));
+    
+    for (const mes of mesesOrdenados) {
+      const alarmasMes = porMes[mes];
+      mensaje += `\n<b>${NOMBRES_MESES[parseInt(mes) - 1]}</b> (${alarmasMes.length}):\n`;
+      
+      // Ordenar por día
+      alarmasMes.sort((a, b) => a.diaMes - b.diaMes);
+      
+      for (const al of alarmasMes) {
+        const fecha = new Date(new Date().getFullYear(), al.mes - 1, al.diaMes);
+        const diaSemana = nombresDias[fecha.getDay()];
+        mensaje += `  • ${diaSemana} ${al.diaMes} - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}\n`;
+      }
+    }
+    
+    if (semanales.length > 0) {
+      mensaje += `\n🔄 <b>SEMANALES</b> (${semanales.length}):\n`;
+      for (const al of semanales) {
+        mensaje += `  • ${nombresDias[al.diaSemana]} - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}\n`;
+      }
+    }
+    
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, mensaje, [[{ text: "↩️ Volver", callback_data: "volver_ver" }]]);
+  }
+  else if (data === "volver_ver") {
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Usa /ver para ver tus alarmas.", null);
+  }
   else if (data.startsWith("editar_nota:")) {
     const id = data.split(":")[1];
     const alarmas = await leerAlarmas(env);
@@ -1090,19 +1167,139 @@ async function processMessage(msg, env) {
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🤷‍♂️ No tienes ninguna alarma configurada.");
       return;
     }
-    await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "📋 <b>TUS ALARMAS ACTIVAS:</b>");
-    for (const al of alarmas) {
-      const fechaTxt = al.tipo === "semanal"
-        ? `🔄 Todos los <b>${nombresDias[al.diaSemana]}</b>`
-        : `📅 El <b>${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
-      await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n📝 <i>${escapeHTML(al.nota)}</i>`,
-        [
-          [{ text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` }],
-          [{ text: "❌ Borrar esta alarma", callback_data: `preguntar_borrar:${al.id}` }]
-        ]
-      );
+    
+    // 🆕 Ordenar y agrupar alarmas
+    const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+    const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+    
+    // Separar semanales y únicas
+    const semanales = alarmas.filter(a => a.tipo === "semanal");
+    const unicas = alarmas.filter(a => a.tipo === "unica");
+    
+    // Ordenar únicas por proximidad
+    unicas.sort((a, b) => {
+      const fechaA = new Date(ahora.getFullYear(), a.mes - 1, a.diaMes, a.hora, a.minuto);
+      const fechaB = new Date(ahora.getFullYear(), b.mes - 1, b.diaMes, b.hora, b.minuto);
+      // Si la fecha ya pasó este año, considerar año siguiente
+      if (fechaA < ahora) fechaA.setFullYear(fechaA.getFullYear() + 1);
+      if (fechaB < ahora) fechaB.setFullYear(fechaB.getFullYear() + 1);
+      return fechaA - fechaB;
+    });
+    
+    // Agrupar por categorías temporales
+    const grupos = {
+      hoy: [],
+      manana: [],
+      estaSemana: [],
+      esteMes: [],
+      proximosMeses: []
+    };
+    
+    const mananaInicio = new Date(hoyInicio.getTime() + 86400000);
+    const finSemana = new Date(hoyInicio.getTime() + 7 * 86400000);
+    const finMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0);
+    
+    for (const al of unicas) {
+      const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+      if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
+      
+      if (fecha.toDateString() === hoyInicio.toDateString()) {
+        grupos.hoy.push(al);
+      } else if (fecha.toDateString() === mananaInicio.toDateString()) {
+        grupos.manana.push(al);
+      } else if (fecha < finSemana) {
+        grupos.estaSemana.push(al);
+      } else if (fecha <= finMes) {
+        grupos.esteMes.push(al);
+      } else {
+        grupos.proximosMeses.push(al);
+      }
     }
+    
+    // Construir mensaje agrupado
+    let mensaje = `📋 <b>TUS ALARMAS</b> (${alarmas.length} total)`;
+    let contador = 0;
+    const limite = 10;
+    
+    // HOY
+    if (grupos.hoy.length > 0) {
+      mensaje += `\n\n📅 <b>HOY</b> (${grupos.hoy.length})`;
+      for (const al of grupos.hoy) {
+        if (contador >= limite) break;
+        const diaSemana = nombresDias[new Date(ahora.getFullYear(), al.mes - 1, al.diaMes).getDay()].toLowerCase();
+        mensaje += `\n  • <b>${al.hora}:${al.minuto}</b> - ${escapeHTML(al.nota)}`;
+        contador++;
+      }
+    }
+    
+    // MAÑANA
+    if (grupos.manana.length > 0 && contador < limite) {
+      mensaje += `\n\n📅 <b>MAÑANA</b> (${grupos.manana.length})`;
+      for (const al of grupos.manana) {
+        if (contador >= limite) break;
+        mensaje += `\n  • <b>${al.hora}:${al.minuto}</b> - ${escapeHTML(al.nota)}`;
+        contador++;
+      }
+    }
+    
+    // ESTA SEMANA
+    if (grupos.estaSemana.length > 0 && contador < limite) {
+      mensaje += `\n\n📅 <b>ESTA SEMANA</b> (${grupos.estaSemana.length})`;
+      for (const al of grupos.estaSemana) {
+        if (contador >= limite) break;
+        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+        const diaSemana = nombresDias[fecha.getDay()];
+        mensaje += `\n  • <b>${diaSemana} ${al.diaMes}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
+        contador++;
+      }
+    }
+    
+    // ESTE MES
+    if (grupos.esteMes.length > 0 && contador < limite) {
+      mensaje += `\n\n📅 <b>ESTE MES</b> (${grupos.esteMes.length})`;
+      for (const al of grupos.esteMes) {
+        if (contador >= limite) break;
+        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+        const diaSemana = nombresDias[fecha.getDay()];
+        mensaje += `\n  • <b>${diaSemana} ${al.diaMes}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
+        contador++;
+      }
+    }
+    
+    // PRÓXIMOS MESES
+    if (grupos.proximosMeses.length > 0 && contador < limite) {
+      mensaje += `\n\n📅 <b>PRÓXIMOS MESES</b> (${grupos.proximosMeses.length})`;
+      for (const al of grupos.proximosMeses) {
+        if (contador >= limite) break;
+        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+        const diaSemana = nombresDias[fecha.getDay()];
+        mensaje += `\n  • <b>${diaSemana} ${al.diaMes} ${NOMBRES_MESES[al.mes - 1]}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
+        contador++;
+      }
+    }
+    
+    // SEMANALES
+    if (semanales.length > 0) {
+      mensaje += `\n\n🔄 <b>SEMANALES</b> (${semanales.length})`;
+      for (const al of semanales) {
+        if (contador >= limite) break;
+        mensaje += `\n  • <b>Todos los ${nombresDias[al.diaSemana]}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
+        contador++;
+      }
+    }
+    
+    // Botones
+    const botones = [];
+    if (alarmas.length > limite) {
+      mensaje += `\n\n<i>Mostrando ${contador} de ${alarmas.length} alarmas</i>`;
+      botones.push([{ text: "📋 Ver todas", callback_data: "ver_todas" }]);
+    }
+    botones.push([
+      { text: "🔍 Buscar", callback_data: "buscar_alarma" },
+      { text: "📆 Por mes", callback_data: "ver_por_mes" }
+    ]);
+    
+    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId, mensaje, botones);
     return;
   }
 
@@ -1188,6 +1385,45 @@ async function processMessage(msg, env) {
   const esperandoNotaMsgId = await env.ALARMAS_KV.get(`esperando_nota:${chatId}`);
   if (esperandoNotaMsgId && !text.startsWith('/')) {
     await guardarNotaYFinalizar(env, chatId, parseInt(esperandoNotaMsgId), text);
+    return;
+  }
+  
+  // 🆕 Manejar búsqueda de alarmas
+  const esperandoBusqueda = await env.ALARMAS_KV.get(`esperando_busqueda:${chatId}`);
+  if (esperandoBusqueda && !text.startsWith('/')) {
+    await env.ALARMAS_KV.delete(`esperando_busqueda:${chatId}`);
+    
+    const alarmas = await leerAlarmas(env);
+    const termino = text.toLowerCase();
+    const resultados = alarmas.filter(a => a.nota.toLowerCase().includes(termino));
+    
+    if (resultados.length === 0) {
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+        `🔍 No encontré alarmas con "<i>${escapeHTML(text)}</i>"\n\nIntenta con otras palabras.`
+      );
+      return;
+    }
+    
+    await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+      `🔍 <b>Encontré ${resultados.length} alarma${resultados.length > 1 ? 's' : ''}:</b>`
+    );
+    
+    for (const al of resultados) {
+      const fechaTxt = al.tipo === "semanal"
+        ? `🔄 Todos los <b>${nombresDias[al.diaSemana]}</b>`
+        : (() => {
+            const fecha = new Date(new Date().getFullYear(), al.mes - 1, al.diaMes);
+            const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
+            return `📅 El <b>${diaSemana} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
+          })();
+      await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n📝 <i>${escapeHTML(al.nota)}</i>`,
+        [
+          [{ text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` }],
+          [{ text: "❌ Borrar", callback_data: `preguntar_borrar:${al.id}` }]
+        ]
+      );
+    }
     return;
   }
   
