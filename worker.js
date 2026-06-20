@@ -516,21 +516,11 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     
     console.log("✅ Total alarmas después de guardar:", alarmas.length); // 🆕 Debug
 
-    // Para múltiples alarmas, crear botones para cada una
     const resumen = nuevas.map(a =>
       `📅 <b>${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`
     ).join('\n');
-    
-    // 🆕 Botones para editar cada alarma
-    const botones = nuevas.map(a => [{ 
-      text: `✏️ Editar "${a.nota.substring(0, 20)}${a.nota.length > 20 ? '...' : ''}"`, 
-      callback_data: `editar_desc_nueva:${a.id}` 
-    }]);
-    
-    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-      `✅ <b>¡${nuevas.length} alarmas guardadas!</b>\n\n${resumen}\n📝 <i>${escapeHTML(nuevas[0].nota)}</i>`,
-      botones,
-      msgId
+    await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
+      `✅ <b>¡${nuevas.length} alarmas guardadas!</b>\n\n${resumen}\n📝 <i>${escapeHTML(nuevas[0].nota)}</i>`
     );
     return;
   }
@@ -559,14 +549,8 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   } else {
     fechaTxt = `📅 El <b>${datos.diaMes} de ${NOMBRES_MESES[Number(datos.mes) - 1]}</b>`;
   }
-  
-  // 🆕 Agregar botón de editar descripción
-  const botones = [[{ text: "✏️ Editar descripción", callback_data: `editar_desc_nueva:${alarma.id}` }]];
-  
-  await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
-    botones,
-    msgId  // 🆕 Reply al mensaje original
+  await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
+    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`
   );
 }
 
@@ -887,60 +871,6 @@ async function handleCallback(cb, env) {
     const alarmas = await leerAlarmas(env);
     const alarma = alarmas.find(a => a.id === id);
     if (!alarma) {
-      await answerCallback(cb);
-      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "⚠️ Alarma no encontrada.", null);
-      return;
-    }
-    
-    // Guardar en KV que estamos esperando una nueva nota para esta alarma
-    await env.ALARMAS_KV.put(`esperando_edicion_nota:${chatId}`, id);
-    
-    await answerCallback(cb);
-    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `✏️ <b>Editando nota de alarma</b>\n\n📝 Nota actual: <i>"${escapeHTML(alarma.nota)}"</i>\n\n💬 Escribe la nueva descripción:`,
-        parse_mode: 'HTML',
-        reply_markup: {
-          force_reply: true,
-          input_field_placeholder: "Nueva descripción..."
-        }
-      })
-    });
-  }
-  else if (data.startsWith("editar_desc_nueva:")) {
-    // 🆕 Editar descripción de alarma recién creada
-    const id = data.split(":")[1];
-    const alarmas = await leerAlarmas(env);
-    const alarma = alarmas.find(a => a.id === id);
-    if (!alarma) {
-      await answerCallback(cb);
-      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "⚠️ Alarma no encontrada.", null);
-      return;
-    }
-    
-    // Guardar en KV que estamos esperando una nueva nota para esta alarma
-    await env.ALARMAS_KV.put(`esperando_edicion_nota:${chatId}`, id);
-    
-    await answerCallback(cb);
-    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: chatId,
-        text: `✏️ <b>Editando descripción</b>\n\n📝 Descripción actual: <i>"${escapeHTML(alarma.nota)}"</i>\n\n💬 Escribe la nueva descripción:`,
-        parse_mode: 'HTML',
-        reply_markup: {
-          force_reply: true,
-          input_field_placeholder: "Nueva descripción..."
-        }
-      })
-    });
-  }
-    const alarma = alarmas.find(a => a.id === id);
-    if (!alarma) {
       await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", null);
       return;
     }
@@ -994,11 +924,9 @@ async function guardarNotaYFinalizar(env, chatId, messageId, nota) {
   const resumen = config.tipo === "semanal"
     ? `🔄 Todos los <b>${nombresDias[config.diaSemana]}</b>`
     : `📅 El <b>${config.diaMes} de ${NOMBRES_MESES[config.mes - 1]}</b>`;
-  
-  // 🆕 Editar mensaje original y agregar botón de editar
   await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
     `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n📝 <i>${escapeHTML(config.nota)}</i>`,
-    [[{ text: "✏️ Editar descripción", callback_data: `editar_desc_nueva:${config.id}` }]]
+    null
   );
 }
 
@@ -1359,20 +1287,11 @@ async function sendText(token, chatId, replyId, text) {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage?${params}`);
 }
 
-async function sendTextConBotones(token, chatId, text, infoBotones, replyToMessageId = null) {
-  const body = {
-    chat_id: chatId,
-    text,
-    parse_mode: 'HTML',
-    reply_markup: { inline_keyboard: infoBotones }
-  };
-  if (replyToMessageId) {
-    body.reply_to_message_id = replyToMessageId;
-  }
+async function sendTextConBotones(token, chatId, text, infoBotones) {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: infoBotones } })
   });
 }
 
