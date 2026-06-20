@@ -384,6 +384,13 @@ function detectarTiempoRelativo(texto) {
 
   // ── "mañana y pasado mañana" — múltiples fechas ─────────────────────────
   } else if (/\bma[ñn]ana\b/.test(normalizado) && /pasado\s+ma[ñn]ana/.test(normalizado)) {
+    // 🆕 Verificar si tiene múltiples horas diferentes (ej: "las 10 y 12... a las 12")
+    const horasEnTexto = texto.match(/\d{1,2}(?:[:：]\d{2})?/g) || [];
+    if (horasEnTexto.length > 2) {
+      // Caso complejo con múltiples horas → delegar a IA
+      return null;
+    }
+    
     // Caso especial: contiene AMBAS → devolver múltiple
     const matchHoraMulti = texto.match(/a\s+las\s+(\d{1,2})(?:[:：](\d{2})|\s+y\s+(media|cuarto))?/i);
     let horaM = "11", minutoM = "00";
