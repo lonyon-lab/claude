@@ -555,7 +555,8 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   
   await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
     `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
-    botones
+    botones,
+    msgId  // 🆕 Reply al mensaje original
   );
 }
 
@@ -1346,11 +1347,20 @@ async function sendText(token, chatId, replyId, text) {
   await fetch(`https://api.telegram.org/bot${token}/sendMessage?${params}`);
 }
 
-async function sendTextConBotones(token, chatId, text, infoBotones) {
+async function sendTextConBotones(token, chatId, text, infoBotones, replyToMessageId = null) {
+  const body = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    reply_markup: { inline_keyboard: infoBotones }
+  };
+  if (replyToMessageId) {
+    body.reply_to_message_id = replyToMessageId;
+  }
   await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML', reply_markup: { inline_keyboard: infoBotones } })
+    body: JSON.stringify(body)
   });
 }
 
