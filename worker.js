@@ -280,7 +280,28 @@ function detectarAmbiguedadManana(texto, ahora) {
 }
 
 // ─── REGEX: tiempos relativos ─────────────────────────────────────────────────
-function detectarTiempoRelativo(texto) {
+// ─── 🆕 FRANJA HORARIA (AM/PM) ────────────────────────────────────────────────
+// Decide si una hora explícita (1-11) es clara o ambigua.
+// - Con marcador "de la tarde/noche" → PM (suma 12)
+// - Con marcador "de la mañana/madrugada" o contexto de mañana → AM literal
+// - Sin marcador → ambigua: el bot debe preguntar
+function resolverFranjaHoraria(h, marcadores, nota) {
+  const esTarde   = /(de|por)\s+la\s+tarde|(de|por)\s+la\s+noche|\bp\.?\s?m\.?\b/i.test(marcadores);
+  const esManana  = /(de|por)\s+la\s+ma[ñn]ana|madrugada|\ba\.?\s?m\.?\b/i.test(marcadores);
+  const ctxManana = /despert|desayun|levantar|amanecer|misa/i.test(nota || "");
+
+  if (h >= 1 && h <= 11) {
+    if (esTarde)             return { hora: h + 12, ambigua: false };
+    if (esManana || ctxManana) return { hora: h,    ambigua: false };
+    return { hora: h, ambigua: true }; // sin pistas → preguntar
+  }
+  return { hora: h, ambigua: false }; // 0 y 12-23 no son ambiguas
+}
+
+function detectarTiempoRelativo(texto, textoOriginal) {
+  // 🆕 Los marcadores am/pm se buscan en el texto ORIGINAL, porque la
+  //    normalización ya convierte "9 de la mañana" → "09:00" (perdiendo el marcador).
+  const original = (textoOriginal || texto).toLowerCase();
   const normalizado = texto.toLowerCase()
     .replace(/dentr[oa]\s*e\s+/g, 'dentro de ')
     .replace(/dento\s+de\s+/g,    'dentro de ')
@@ -417,9 +438,11 @@ function detectarTiempoRelativo(texto) {
   const matchHHMM  = texto.match(/(\d{1,2}):(\d{2})/);
   const matchAlasX = texto.match(/a\s+las\s+(\d{1,2})(?:\s+y\s+(media|cuarto|(\d{1,2})))?/i);
 
+  let horaExplicita = false;
   if (matchHHMM) {
     hora   = String(parseInt(matchHHMM[1])).padStart(2,'0');
     minuto = matchHHMM[2];
+    horaExplicita = true;
   } else if (matchAlasX) {
     hora = String(parseInt(matchAlasX[1])).padStart(2,'0');
     if (!matchAlasX[2]) {
@@ -431,6 +454,7 @@ function detectarTiempoRelativo(texto) {
     } else if (matchAlasX[3]) {
       minuto = String(parseInt(matchAlasX[3])).padStart(2,'0');
     }
+    horaExplicita = true;
   }
 
   // 🆕 Nota explícita: si el usuario dice "nota ..." o "nota: ...", usar lo que sigue
@@ -456,6 +480,8 @@ function detectarTiempoRelativo(texto) {
     .replace(/av[ií]same/gi, '')
     .replace(/despertador/gi, 'Despertador')
     .replace(/\d+\s+de\s+[a-záéíóúñ]+/gi, '')
+    .replace(/\b(de\s+)?(la\s+)?(madrugada|ma[ñn]ana|tarde|noche)\b/gi, '') // 🆕 restos de franja
+    .replace(/\bde\s+de\b/gi, '')                      // 🆕 "de de"
     .replace(/\ba\s+las\b/gi, '')                       // 🆕 restos de "a las"
     .replace(/\s{2,}/g, ' ')                            // 🆕 colapsar espacios
     .replace(/^[,\s]+|[,\s]+$/g, '')
@@ -464,13 +490,21 @@ function detectarTiempoRelativo(texto) {
 
   const notaFinal = notaExplicita || notaLimpia;
 
+  // 🆕 Resolver franja horaria (am/pm) cuando la hora es explícita
+  let ambiguaFranja = false;
+  if (horaExplicita && hora !== null) {
+    const fr = resolverFranjaHoraria(parseInt(hora), original, notaFinal);
+    hora = String(fr.hora).padStart(2, '0');
+    ambiguaFranja = fr.ambigua;
+  }
+
   if (hora === null) {
     const def = horaDefectoPorNota(notaFinal);
     hora   = def.hora;
     minuto = def.minuto;
   }
 
-  return { hora, minuto, diaMes: dia, mes, nota: notaFinal };
+  return { hora, minuto, diaMes: dia, mes, nota: notaFinal, ambiguaFranja };
 }
 
 function pareceTenerIntencionDeTiempo(texto) {
@@ -994,6 +1028,22 @@ async function handleCallback(cb, env) {
     }
     
     await guardarAlarmaDesdeIA(pendiente, env, chatId, messageId);
+  }
+  else if (data === "franja:am" || data === "franja:pm") {
+    // 🆕 Resolver hora ambigua (am/pm) elegida por el usuario
+    const pend = await env.ALARMAS_KV.get(`pendiente_franja:${chatId}`, { type: "json" });
+    if (!pend) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ La operación expiró. Vuelve a escribir el recordatorio.", null);
+      return;
+    }
+    await env.ALARMAS_KV.delete(`pendiente_franja:${chatId}`);
+    const hora = data === "franja:pm" ? pend.horaPM : pend.horaAM;
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, `👍 Hora seleccionada: <b>${hora}:${pend.minuto}</b>`, null);
+    await guardarAlarmaDesdeIA({
+      esAlarma: true, tipo: "unica",
+      diaMes: pend.diaMes, mes: pend.mes,
+      hora, minuto: pend.minuto, nota: pend.nota
+    }, env, chatId, messageId);
   }
   else if (data.startsWith("preguntar_borrar:")) {
     const id      = data.split(":")[1];
@@ -1612,7 +1662,7 @@ async function processMessage(msg, env) {
     console.log("📝 TEXTO NORMALIZADO:", textNormalizado); // 🆕 Log normalizado
     
     // Capa 1: Regex tiempo relativo (con texto normalizado)
-    const tiempoRelativo = detectarTiempoRelativo(textNormalizado);
+    const tiempoRelativo = detectarTiempoRelativo(textNormalizado, text);
     console.log("🔍 Regex resultado:", tiempoRelativo ? "DETECTADO" : "null"); // 🆕 Log
     
     if (tiempoRelativo) {
@@ -1624,6 +1674,28 @@ async function processMessage(msg, env) {
           multiple: true,
           alarmas: tiempoRelativo.fechas.map(f => ({ ...f, tipo: "unica" }))
         }, env, chatId, msgId);
+      } else if (tiempoRelativo.ambiguaFranja) {
+        // 🆕 Hora ambigua (sin marcador am/pm) → preguntar al usuario
+        const amH = tiempoRelativo.hora;
+        const pmH = String(parseInt(amH) + 12).padStart(2, '0');
+        const amInt = parseInt(amH), pmInt = parseInt(pmH);
+        const amLabel = amInt < 6 ? "madrugada" : "mañana";
+        const pmLabel = pmInt < 20 ? "tarde" : "noche";
+
+        await env.ALARMAS_KV.put(`pendiente_franja:${chatId}`, JSON.stringify({
+          tipo: "unica",
+          diaMes: tiempoRelativo.diaMes, mes: tiempoRelativo.mes,
+          minuto: tiempoRelativo.minuto, nota: tiempoRelativo.nota,
+          horaAM: amH, horaPM: pmH
+        }));
+
+        await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+          `🤔 ¿A qué hora te refieres con las <b>${amInt}:${tiempoRelativo.minuto}</b>?\n📝 <i>${escapeHTML(tiempoRelativo.nota)}</i>`,
+          [[
+            { text: `🌙 ${amH}:${tiempoRelativo.minuto} (${amLabel})`, callback_data: "franja:am" },
+            { text: `☀️ ${pmH}:${tiempoRelativo.minuto} (${pmLabel})`, callback_data: "franja:pm" }
+          ]]
+        );
       } else {
         await guardarAlarmaDesdeIA({
           esAlarma: true, tipo: "unica",
