@@ -328,6 +328,22 @@ No alarma: {"esAlarma":false}`;
         if (!a.nota) a.nota = "Recordatorio";
         a.hora   = String(parseInt(a.hora)).padStart(2,'0');
         a.minuto = String(parseInt(a.minuto)).padStart(2,'0');
+        
+        // 🆕 Procesar diasAntes para cada alarma en caso múltiple
+        if (a.diasAntes !== undefined && a.tipo === "unica") {
+          let diasARestar = parseInt(a.diasAntes);
+          if (diasARestar === -1 && a.diasAntesMin !== undefined && a.diasAntesMax !== undefined) {
+            const min = parseInt(a.diasAntesMin);
+            const max = parseInt(a.diasAntesMax);
+            diasARestar = Math.floor(Math.random() * (max - min + 1)) + min;
+          }
+          if (diasARestar > 0) {
+            const fechaEvento = new Date(ahora.getFullYear(), a.mes - 1, a.diaMes);
+            fechaEvento.setDate(fechaEvento.getDate() - diasARestar);
+            a.diaMes = fechaEvento.getDate();
+            a.mes    = fechaEvento.getMonth() + 1;
+          }
+        }
       }
     }
 
