@@ -521,17 +521,18 @@ async function enviarAlarma(token, chatId, alarma, textoAlarma) {
 
 // ─── GUARDAR ALARMA DESDE IA ──────────────────────────────────────────────────
 async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
-  const ruido = ["el","la","los","las","un","una","de","del","al","para","con","en","por","y","o","mi","tu"];
-  const palabrasClave = datos.nota.toLowerCase().split(/\s+/).filter(p => !ruido.includes(p) && p.length > 2);
-  const terminoIngles = await traducirAlIngles(palabrasClave.join(" ") || datos.nota);
-  const fotoPexels = await buscarFotoPexels(terminoIngles, env.PEXELS_API_KEY);
-  const fotoUrl = fotoPexels || FOTO_POR_DEFECTO;
-
   const alarmas = await leerAlarmas(env);
   const nombresDias = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
 
   // Caso múltiples alarmas
   if (datos.multiple && Array.isArray(datos.alarmas)) {
+    // 🆕 Para múltiples alarmas, buscar foto basada en la primera nota
+    const ruido = ["el","la","los","las","un","una","de","del","al","para","con","en","por","y","o","mi","tu"];
+    const notaParaFoto = datos.alarmas[0]?.nota || "recordatorio";
+    const palabrasClave = notaParaFoto.toLowerCase().split(/\s+/).filter(p => !ruido.includes(p) && p.length > 2);
+    const terminoIngles = await traducirAlIngles(palabrasClave.join(" ") || notaParaFoto);
+    const fotoPexels = await buscarFotoPexels(terminoIngles, env.PEXELS_API_KEY);
+    const fotoUrl = fotoPexels || FOTO_POR_DEFECTO;
     const nuevas = datos.alarmas.map(a => ({
       id: `${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
       tipo: a.tipo,
@@ -555,6 +556,12 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   }
 
   // Caso alarma única
+  const ruido = ["el","la","los","las","un","una","de","del","al","para","con","en","por","y","o","mi","tu"];
+  const palabrasClave = datos.nota.toLowerCase().split(/\s+/).filter(p => !ruido.includes(p) && p.length > 2);
+  const terminoIngles = await traducirAlIngles(palabrasClave.join(" ") || datos.nota);
+  const fotoPexels = await buscarFotoPexels(terminoIngles, env.PEXELS_API_KEY);
+  const fotoUrl = fotoPexels || FOTO_POR_DEFECTO;
+
   const id = Date.now().toString();
   const alarma = {
     id, tipo: datos.tipo, hora: datos.hora, minuto: datos.minuto,
