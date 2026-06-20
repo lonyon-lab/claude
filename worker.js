@@ -547,6 +547,8 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
 
   // Caso múltiples alarmas
   if (datos.multiple && Array.isArray(datos.alarmas)) {
+    console.log("🔄 Guardando múltiples alarmas:", JSON.stringify(datos.alarmas)); // 🆕 Debug
+    
     // 🆕 Para múltiples alarmas, buscar foto basada en la primera nota
     const ruido = ["el","la","los","las","un","una","de","del","al","para","con","en","por","y","o","mi","tu"];
     const notaParaFoto = datos.alarmas[0]?.nota || "recordatorio";
@@ -554,18 +556,26 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     const terminoIngles = await traducirAlIngles(palabrasClave.join(" ") || notaParaFoto);
     const fotoPexels = await buscarFotoPexels(terminoIngles, env.PEXELS_API_KEY);
     const fotoUrl = fotoPexels || FOTO_POR_DEFECTO;
-    const nuevas = datos.alarmas.map(a => ({
-      id: `${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
-      tipo: a.tipo,
-      hora: a.hora,
-      minuto: a.minuto,
-      nota: a.nota || datos.nota || "Recordatorio",
-      fotoUrl,
-      ultimaEnviada: "",
-      ...(a.tipo === "unica" ? { diaMes: a.diaMes, mes: a.mes } : { diaSemana: a.diaSemana })
-    }));
+    
+    const nuevas = datos.alarmas.map(a => {
+      const alarma = {
+        id: `${Date.now()}_${Math.random().toString(36).slice(2,6)}`,
+        tipo: a.tipo,
+        hora: String(a.hora).padStart(2,'0'),      // 🆕 Asegurar formato
+        minuto: String(a.minuto).padStart(2,'0'),  // 🆕 Asegurar formato
+        nota: a.nota || datos.nota || "Recordatorio",
+        fotoUrl,
+        ultimaEnviada: "",
+        ...(a.tipo === "unica" ? { diaMes: a.diaMes, mes: a.mes } : { diaSemana: a.diaSemana })
+      };
+      console.log("📦 Alarma creada:", JSON.stringify(alarma)); // 🆕 Debug
+      return alarma;
+    });
+    
     alarmas.push(...nuevas);
     await guardarAlarmas(env, alarmas);
+    
+    console.log("✅ Total alarmas después de guardar:", alarmas.length); // 🆕 Debug
 
     const resumen = nuevas.map(a =>
       `📅 <b>${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`
@@ -988,6 +998,21 @@ async function processMessage(msg, env) {
     } catch(e) { statusPexels = String(e); }
     await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
       `🔍 <b>DEBUG</b>\n\n🔑 Key: <code>${keyOk}</code>\n🌐 Pexels: <code>${statusPexels}</code>\n📸 Fotos: <code>${totalResultados}</code>\n🖼 URL: <code>${urlFoto.slice(0,80)}</code>\n🌍 Traducción: <code>${traduccion}</code>\n📦 Alarmas: <code>${alarmas.length}</code>`
+    );
+    return;
+  }
+
+  // 🆕 COMANDO /borrar - Eliminar todas las alarmas (para testing)
+  if (text === '/borrar') {
+    const alarmas = await leerAlarmas(env);
+    if (alarmas.length === 0) {
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🤷‍♂️ No hay alarmas para borrar.");
+      return;
+    }
+    const cantidad = alarmas.length;
+    await guardarAlarmas(env, []); // Vaciar todas las alarmas
+    await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+      `🗑️ <b>¡${cantidad} alarma${cantidad > 1 ? 's' : ''} eliminada${cantidad > 1 ? 's' : ''}!</b>\n\n✨ La lista está limpia.`
     );
     return;
   }
