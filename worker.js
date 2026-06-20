@@ -909,8 +909,23 @@ async function handleCallback(cb, env) {
       return;
     }
     await env.ALARMAS_KV.delete(`pendiente_manana:${chatId}`);
-    pendiente.diaMes = diaMes;
-    pendiente.mes    = mes;
+    
+    // 🆕 Manejar tanto alarmas únicas como múltiples
+    if (pendiente.multiple && Array.isArray(pendiente.alarmas)) {
+      // Para cada alarma múltiple, ajustar la fecha si usa "mañana"
+      for (const alarma of pendiente.alarmas) {
+        if (alarma.tipo === "unica") {
+          // Si la alarma original tenía la fecha del "mañana" de la IA, actualizarla
+          alarma.diaMes = diaMes;
+          alarma.mes = mes;
+        }
+      }
+    } else {
+      // Alarma única (comportamiento original)
+      pendiente.diaMes = diaMes;
+      pendiente.mes    = mes;
+    }
+    
     await guardarAlarmaDesdeIA(pendiente, env, chatId, messageId);
   }
   else if (data.startsWith("preguntar_borrar:")) {
@@ -1136,16 +1151,19 @@ async function processMessage(msg, env) {
       return;
     }
 
-    // Ambigüedad mañana en madrugada
+    // 🆕 Ambigüedad mañana en madrugada (ahora también para múltiples)
     const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
-    if (!datos.multiple && datos.tipo === "unica" && detectarAmbiguedadManana(text, ahora)) {
+    if (detectarAmbiguedadManana(text, ahora)) {
       const diasSemana = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
       const manana = new Date(ahora.getTime() + 86400000);
       const dHoy = ahora.getDate(), mHoy = ahora.getMonth() + 1;
       const dMan = manana.getDate(), mMan = manana.getMonth() + 1;
+      
+      // Guardar los datos completos (único o múltiple)
       await env.ALARMAS_KV.put(`pendiente_manana:${chatId}`, JSON.stringify(datos));
+      
       await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-        "📅 ¿Te refieres a...",
+        "📅 Cuando dices 'mañana', ¿te refieres a...?",
         [
           [{ text: `Hoy ${diasSemana[ahora.getDay()]} ${dHoy} de ${NOMBRES_MESES[ahora.getMonth()]}`,   callback_data: `confirmar_manana:${dHoy}:${mHoy}` }],
           [{ text: `Mañana ${diasSemana[manana.getDay()]} ${dMan} de ${NOMBRES_MESES[manana.getMonth()]}`, callback_data: `confirmar_manana:${dMan}:${mMan}` }]
