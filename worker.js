@@ -1093,6 +1093,7 @@ async function processMessage(msg, env) {
       // 🆕 Ahora procesar como texto normal (sin recursión infinita)
       // Simplemente asignar el texto transcrito y continuar el flujo
       msg.text = textoTranscrito;
+      msg.fromVoice = true; // 🆕 Marcar que vino de audio para dar feedback apropiado
       delete msg.voice; // Eliminar voz para que no vuelva a procesarse
       
       // El flujo continuará abajo en el procesamiento de texto normal
@@ -1313,7 +1314,15 @@ async function processMessage(msg, env) {
     // Capa 2: IA (con texto normalizado)
     const datos = await interpretarAlarmaConIA(textNormalizado, env.AI);
     if (!datos || !datos.esAlarma) {
-      if (tieneLinks) await generarQRs(text, env.TELEGRAM_TOKEN, chatId, msgId);
+      // Si no es alarma, verificar si tiene links para QR
+      if (tieneLinks) {
+        await generarQRs(text, env.TELEGRAM_TOKEN, chatId, msgId);
+      } else if (msg.fromVoice) {
+        // 🆕 Si venía de audio y la IA no entendió, avisar al usuario
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+          `❌ <b>No entendí:</b> <i>"${escapeHTML(text)}"</i>\n\n💡 <b>Sugerencia:</b> Intenta:\n• Hablar más claro y pausado\n• Una frase más simple: "alarma mañana a las 10"\n• O escríbelo en su lugar`
+        );
+      }
       return;
     }
 
