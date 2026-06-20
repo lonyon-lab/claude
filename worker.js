@@ -624,7 +624,7 @@ function ordenarAlarmas(alarmas) {
     const fb = new Date(ahora.getFullYear(), b.mes - 1, b.diaMes, parseInt(b.hora), parseInt(b.minuto));
     if (fa < ahora) fa.setFullYear(fa.getFullYear() + 1);
     if (fb < ahora) fb.setFullYear(fb.getFullYear() + 1);
-    return fa - fb;
+    return fa.getTime() - fb.getTime();
   });
   const semanales = alarmas.filter(a => a.tipo === "semanal");
   return [...unicas, ...semanales];
