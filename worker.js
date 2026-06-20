@@ -1002,6 +1002,60 @@ async function processMessage(msg, env) {
 
   const chatId  = msg.chat.id;
   const msgId   = msg.message_id;
+  
+  // 🆕 SOPORTE DE MENSAJES DE VOZ
+  if (msg.voice) {
+    try {
+      // Obtener info del archivo de voz
+      const fileInfoRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getFile?file_id=${msg.voice.file_id}`);
+      const fileInfo = await fileInfoRes.json();
+      
+      if (!fileInfo.ok) {
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ No pude procesar el audio. Inténtalo de nuevo.");
+        return;
+      }
+      
+      const filePath = fileInfo.result.file_path;
+      const audioUrl = `https://api.telegram.org/file/bot${env.TELEGRAM_TOKEN}/${filePath}`;
+      
+      // Descargar el audio
+      const audioRes = await fetch(audioUrl);
+      const audioBuffer = await audioRes.arrayBuffer();
+      
+      // Usar Cloudflare AI para transcribir (Whisper)
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🎤 Transcribiendo audio...");
+      
+      const transcription = await env.AI.run("@cf/openai/whisper", {
+        audio: Array.from(new Uint8Array(audioBuffer))
+      });
+      
+      const textoTranscrito = transcription?.text || transcription?.vtt || "";
+      
+      if (!textoTranscrito || textoTranscrito.trim().length === 0) {
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ No pude entender el audio. ¿Puedes repetirlo?");
+        return;
+      }
+      
+      console.log("🎤 Audio transcrito:", textoTranscrito);
+      
+      // Procesar el texto transcrito como si fuera un mensaje normal
+      const msgSimulado = {
+        ...msg,
+        text: textoTranscrito,
+        voice: undefined
+      };
+      
+      // Procesar recursivamente
+      await processMessage(msgSimulado, env);
+      return;
+      
+    } catch (e) {
+      console.error("💥 Error procesando voz:", e);
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ Error procesando el audio. Inténtalo de nuevo o escribe el mensaje.");
+      return;
+    }
+  }
+  
   const textRaw = (msg.text || msg.caption || '').trim();
 
   // 🆕 USAR NORMALIZACIÓN MEJORADA
