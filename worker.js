@@ -75,6 +75,12 @@ function normalizarTextoAvanzado(texto) {
     // Typos de "una"
     .replace(/\bua\b/gi, 'una')
     
+    // 🆕 Normalizar frases con espacios
+    .replace(/\bAvisa\s+me\b/gi, 'Avísame')
+    .replace(/\bavisa\s+me\b/gi, 'avísame')
+    .replace(/\brecuerda\s+me\b/gi, 'recuérdame')
+    .replace(/\bpon\s+me\b/gi, 'ponme')
+    
     // Números escritos con typos
     .replace(/\bdies\b/gi, '10')
     .replace(/\bdiez\b/gi, '10')
@@ -239,6 +245,12 @@ RESPONDE SOLO JSON VÁLIDO, SIN MARKDOWN NI EXPLICACIONES.
 - Solo son múltiples si hay fechas diferentes: "mañana... y pasado mañana..."
 
 EJEMPLOS:
+"avísame hoy 7 y medio de la tarde"
+→ {"esAlarma":true,"nota":"avísame","tipo":"unica","diaMes":${ahora.getDate()},"mes":${ahora.getMonth()+1},"hora":"19","minuto":"30"}
+
+"hoy 7 y cuarto de la tarde"
+→ {"esAlarma":true,"nota":"recordatorio","tipo":"unica","diaMes":${ahora.getDate()},"mes":${ahora.getMonth()+1},"hora":"19","minuto":"15"}
+
 "mañana a las 10 y 12 reunión"
 → {"esAlarma":true,"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"}
 
@@ -263,7 +275,11 @@ EJEMPLOS:
 REGLAS HORA:
 - Sin hora → contexto: médico/reunión→09:00, comida→12:00, gym→19:00, cena→21:00, defecto→10:00
 - "a las X y Y" donde Y≤59 → X:Y (hora y minutos)
-- "a las 4 de la tarde" → 16:00
+- "X y medio/media" SIN "a las" → X:30 (ej: "7 y medio" = 07:30 o 19:30 según contexto)
+- "X y cuarto" SIN "a las" → X:15 (ej: "7 y cuarto" = 07:15 o 19:15 según contexto)
+- "de la tarde" = +12 horas si hora < 12 (ej: "7 de la tarde" = 19:00)
+- "de la mañana" = hora literal (ej: "7 de la mañana" = 07:00)
+- "de la noche" = +12 horas si hora < 12 (ej: "10 de la noche" = 22:00)
 
 REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
