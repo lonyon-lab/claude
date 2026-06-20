@@ -81,6 +81,26 @@ function normalizarTextoAvanzado(texto) {
     .replace(/\brecuerda\s+me\b/gi, 'recuérdame')
     .replace(/\bpon\s+me\b/gi, 'ponme')
     
+    // 🆕 CRÍTICO: Normalizar "X y medio/cuarto" → "a las X:30/X:15"
+    // Esto DEBE hacerse ANTES de que llegue a la IA
+    .replace(/\b(\d{1,2})\s+y\s+medi[oa]\b/gi, 'a las $1:30')
+    .replace(/\b(\d{1,2})\s+y\s+cuarto\b/gi, 'a las $1:15')
+    
+    // 🆕 Convertir "de la tarde/noche" en horas 24h
+    .replace(/\b([1-9]|1[0-2])(?::(\d{2}))?\s+de\s+la\s+tarde\b/gi, (match, hora, minutos) => {
+      const h = parseInt(hora);
+      const nuevaHora = h < 12 ? h + 12 : h;
+      return minutos ? `a las ${nuevaHora}:${minutos}` : `a las ${nuevaHora}:00`;
+    })
+    .replace(/\b([1-9]|1[0-2])(?::(\d{2}))?\s+de\s+la\s+noche\b/gi, (match, hora, minutos) => {
+      const h = parseInt(hora);
+      const nuevaHora = h < 12 ? h + 12 : h;
+      return minutos ? `a las ${nuevaHora}:${minutos}` : `a las ${nuevaHora}:00`;
+    })
+    .replace(/\b([1-9]|1[0-2])(?::(\d{2}))?\s+de\s+la\s+ma[ñn]ana\b/gi, (match, hora, minutos) => {
+      return minutos ? `a las ${hora}:${minutos}` : `a las ${hora}:00`;
+    })
+    
     // Números escritos con typos
     .replace(/\bdies\b/gi, '10')
     .replace(/\bdiez\b/gi, '10')
