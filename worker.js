@@ -138,18 +138,27 @@ function normalizarTextoAvanzado(texto) {
     // Limpiar ", :XX" → ":XX" (cuando queda de "pero y cuarto")
     .replace(/,\s*:(\d{2})/g, ':$1')
     
-    // 🆕 MEJORADO: Detectar "a las X y Y" donde Y son minutos (más flexible)
-    // Primero 2 dígitos (10-59), debe estar seguido de espacio, coma, "y", o final
-    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})(?=\s|,|$|y)/gi, 'a las $1:$2')
-    
-    // Luego 1 dígito (01-09), solo si parece ser minutos
-    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d)(?=\s|,|$|y)/gi, (match, h, m) => {
+    // 🆕 MEJORADO: Detectar "a las X y Y" donde Y son minutos
+    // SOLO convertir a X:Y si Y > 23 (claramente minutos) o Y está entre 24-59
+    // Si Y ≤ 23, puede ser dos alarmas (ej: "a las 2 y 3" = 02:00 y 03:00)
+    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})(?=\s|,|$)/gi, (match, h, m) => {
       const hora = parseInt(h);
-      const minutos = parseInt(m);
-      // Solo si hora es razonable (0-23) y minuto es 1-9
-      if (hora >= 0 && hora <= 23 && minutos >= 1 && minutos <= 9) {
-        return `a las ${h}:0${m}`;
+      const minuto = parseInt(m);
+      
+      const textoCompleto = arguments[3]; // El texto completo
+      
+      // NO convertir si hay indicios de múltiples fechas
+      const tieneMultiplesFechas = /(?:mañana|manana|hoy|pasado).*(?:y|,).*(?:mañana|manana|hoy|pasado)/i.test(textoCompleto);
+      
+      // Solo convertir a HH:MM si:
+      // 1. NO hay múltiples fechas en el texto
+      // 2. Los minutos son > 23 (claramente minutos: 30, 45, 50, etc.)
+      // 3. La hora es razonable (0-23)
+      if (!tieneMultiplesFechas && hora >= 0 && hora <= 23 && minuto > 23 && minuto <= 59) {
+        return `a las ${h}:${String(minuto).padStart(2, '0')}`;
       }
+      
+      // Si minuto ≤ 23, puede ser dos horas diferentes → dejar sin tocar para IA
       return match;
     })
     
@@ -257,12 +266,19 @@ Pasado mañana: ${pasadoMananaNum} de ${pasadoManananMes}
 
 RESPONDE SOLO JSON VÁLIDO, SIN MARKDOWN NI EXPLICACIONES.
 
-⚠️ CRÍTICO - FORMATO DE HORA:
-- "a las 10 y 12" = UNA alarma a las 10:12 (hora:minuto), NO dos alarmas
-- "a las 12 y 15" = UNA alarma a las 12:15 (hora:minuto), NO dos alarmas  
-- "a las 10:12" = UNA alarma a las 10:12 (hora:minuto)
-- "10 o 12 días" = rango de días (elegir uno entre 10-12), NO es hora 10:12
-- Solo son múltiples si hay fechas diferentes: "mañana... y pasado mañana..."
+⚠️ CRÍTICO - DISTINGUIR HORAS vs MINUTOS:
+
+CASO 1: "a las X y Y" donde Y > 23
+→ X:Y = hora y minutos (UNA sola alarma)
+Ejemplo: "a las 10 y 45" → hora 10:45
+
+CASO 2: "a las X y Y" donde Y ≤ 23
+→ DOS alarmas diferentes a las X:00 y Y:00
+Ejemplo: "a las 2 y 3" → alarma 02:00 Y alarma 03:00
+
+CASO 3: Ya viene como "X:Y"
+→ Una sola alarma a esa hora
+Ejemplo: "a las 10:12" → hora 10:12
 
 EJEMPLOS:
 "avísame hoy 7 y medio de la tarde"
@@ -304,6 +320,8 @@ REGLAS HORA:
 REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
 - "pasado mañana" → ${pasadoMananaNum}/${pasadoMananasMes}
+- "esta madrugada" → si ahora es después de las 6 AM, significa mañana; si es antes de las 6 AM, significa hoy
+- "hoy" → ${ahora.getDate()}/${ahora.getMonth()+1}
 - "dentro de X días" → calcular fecha sumando X días a hoy
 - "dentro de X o Y días" → usar diasAntesMin:X, diasAntesMax:Y, diasAntes:-1 (código elegirá aleatorio)
 - "el día antes" → usa diasAntes:1
@@ -516,6 +534,11 @@ function detectarTiempoRelativo(texto) {
     diasASumar = 2;
   } else if (/\bma[ñn]ana\b/.test(normalizado) && !/de la ma[ñn]ana|por la ma[ñn]ana/.test(normalizado)) {
     diasASumar = 1;
+  // ── "esta madrugada" ──────────────────────────────────────────────────────
+  } else if (/esta\s+madrugada/.test(normalizado)) {
+    // Si ahora son más de las 6 AM, "esta madrugada" = mañana de madrugada
+    // Si son menos de las 6 AM, "esta madrugada" = hoy (aún estamos en madrugada)
+    diasASumar = ahora.getHours() >= 6 ? 1 : 0;
   // ── "hoy" con hora explícita ──────────────────────────────────────────────
   } else if (/\bhoy\b/.test(normalizado)) {
     diasASumar = 0;
