@@ -106,6 +106,9 @@ function normalizarTextoAvanzado(texto) {
     // "y media" → ":30"
     .replace(/\by\s+media\b/gi, ':30')
     
+    // Limpiar ", :XX" → ":XX" (cuando queda de "pero y cuarto")
+    .replace(/,\s*:(\d{2})/g, ':$1')
+    
     // Detectar "a las X y Y" donde Y son minutos de 2 dígitos (10-59)
     .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})\b/gi, 'a las $1:$2')
     
@@ -118,6 +121,9 @@ function normalizarTextoAvanzado(texto) {
       }
       return match;
     })
+    
+    // Detectar "a las X :YY" (cuando quedó separado)
+    .replace(/\ba\s+las\s+(\d{1,2})\s*:(\d{2})\b/gi, 'a las $1:$2')
     
     // Resto normalización original
     .replace(/\bmñn\b/gi, 'mañana')
@@ -220,12 +226,20 @@ Pasado mañana: ${pasadoMananaNum} de ${pasadoManananMes}
 
 RESPONDE SOLO JSON VÁLIDO, SIN MARKDOWN NI EXPLICACIONES.
 
+IMPORTANTE FORMATO DE HORA:
+- "a las 10:12" significa las DIEZ y DOCE MINUTOS (10:12), NO dos alarmas separadas
+- "a las 12:15" significa las DOCE y QUINCE MINUTOS (12:15)
+- Solo son múltiples alarmas si hay "y" entre fechas diferentes
+
 EJEMPLOS:
 "recuérdame mañana a las 10 comprar pan"
 → {"esAlarma":true,"nota":"comprar pan","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"00"}
 
 "todos los lunes a las 8 gimnasio"
 → {"esAlarma":true,"nota":"gimnasio","tipo":"semanal","diaSemana":1,"hora":"08","minuto":"00"}
+
+"mañana a las 10:12 reunión"
+→ {"esAlarma":true,"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"}
 
 "mañana a las 10:12 y pasado mañana a las 12:15 reunión"
 → {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"},{"nota":"reunión","tipo":"unica","diaMes":${pasadoMananaNum},"mes":${pasadoMananasMes},"hora":"12","minuto":"15"}]}
