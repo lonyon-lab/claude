@@ -281,6 +281,9 @@ CASO 3: Ya viene como "X:Y"
 Ejemplo: "a las 10:12" → hora 10:12
 
 EJEMPLOS:
+"avísame de madrugada a las 3 y 5"
+→ {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"recordatorio","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"03","minuto":"00"},{"nota":"recordatorio","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"05","minuto":"00"}]}
+
 "avísame hoy 7 y medio de la tarde"
 → {"esAlarma":true,"nota":"avísame","tipo":"unica","diaMes":${ahora.getDate()},"mes":${ahora.getMonth()+1},"hora":"19","minuto":"30"}
 
@@ -535,9 +538,9 @@ function detectarTiempoRelativo(texto) {
   } else if (/\bma[ñn]ana\b/.test(normalizado) && !/de la ma[ñn]ana|por la ma[ñn]ana/.test(normalizado)) {
     diasASumar = 1;
   // ── "esta madrugada" ──────────────────────────────────────────────────────
-  } else if (/esta\s+madrugada/.test(normalizado)) {
-    // Si ahora son más de las 6 AM, "esta madrugada" = mañana de madrugada
-    // Si son menos de las 6 AM, "esta madrugada" = hoy (aún estamos en madrugada)
+  } else if (/esta\s+madrugada|de\s+madrugada/.test(normalizado)) {
+    // Si ahora son más de las 6 AM, "de madrugada" = mañana de madrugada
+    // Si son menos de las 6 AM, "de madrugada" = hoy (aún estamos en madrugada)
     diasASumar = ahora.getHours() >= 6 ? 1 : 0;
   // ── "hoy" con hora explícita ──────────────────────────────────────────────
   } else if (/\bhoy\b/.test(normalizado)) {
