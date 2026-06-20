@@ -1107,25 +1107,6 @@ async function processMessage(msg, env) {
 
   // ─── PROCESAR TEXTO (tanto directo como transcrito) ─────────────────────────
   const text = msg.text;
-        
-      } catch (processingError) {
-        console.error("💥 Error procesando transcripción:", processingError);
-        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
-          `❌ <b>Error procesando:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n💡 <b>Sugerencia:</b>\n• Intenta con una frase más simple\n• O escríbelo en su lugar`
-        );
-      }
-      return;
-      
-    } catch (voiceError) {
-      console.error("💥 Error en transcripción de voz:", voiceError);
-      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
-        `❌ Error al procesar el audio.\n\n💡 <b>Sugerencia:</b> Intenta:\n• Enviar un audio más corto\n• Hablar más claro y pausado\n• Escribir el mensaje en su lugar`);
-      return;
-    }
-  }
-
-  // ─── PROCESAR TEXTO (tanto directo como transcrito) ─────────────────────────
-  const text = msg.text;
 
   if (!text) {
     // Si no hay texto ni voz, ignorar
