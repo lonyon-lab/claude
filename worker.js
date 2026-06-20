@@ -649,18 +649,19 @@ function construirVistaLista(alarmas, pagina = 0) {
     const fechaCorta = al.tipo === "semanal"
       ? NOMBRES_DIAS[al.diaSemana].slice(0, 3)
       : `${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)}`;
-    const nota = al.nota.length > 28 ? al.nota.slice(0, 28) + "…" : al.nota;
-    texto += `\n<b>${n}.</b> ${fechaCorta} · <b>${al.hora}:${al.minuto}</b> · ⏳${cuentaAtrasCorta(al)} · ${escapeHTML(nota)}`;
+    // Fecha/hora/cuenta atrás en una línea y la nota COMPLETA debajo
+    texto += `\n\n<b>${n}.</b> ${fechaCorta} · <b>${al.hora}:${al.minuto}</b> · ⏳ ${cuentaAtrasCorta(al)}`;
+    texto += `\n     📝 ${escapeHTML(al.nota)}`;
     fila.push({ text: `${n}`, callback_data: `alarma_ver:${al.id}` });
     if (fila.length === 5) { teclado.push(fila); fila = []; }
   });
   if (fila.length) teclado.push(fila);
 
+  // Navegación: solo flechas de página cuando aplican (sin botón de refrescar)
   const nav = [];
-  if (pagina > 0) nav.push({ text: "◀️", callback_data: `lista:${pagina - 1}` });
-  nav.push({ text: "🔄", callback_data: `lista:${pagina}` });
-  if (pagina < totalPag - 1) nav.push({ text: "▶️", callback_data: `lista:${pagina + 1}` });
-  teclado.push(nav);
+  if (pagina > 0) nav.push({ text: "◀️ Anterior", callback_data: `lista:${pagina - 1}` });
+  if (pagina < totalPag - 1) nav.push({ text: "Siguiente ▶️", callback_data: `lista:${pagina + 1}` });
+  if (nav.length) teclado.push(nav);
   teclado.push([{ text: "🔍 Buscar", callback_data: "buscar_alarma" }]);
 
   return { texto, teclado };
