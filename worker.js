@@ -1,17 +1,15 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 // 🔧 MEJORAS APLICADAS:
-// ✅ Normalización avanzada de typos (pome→ponme, lasrmas→alarma, dies→10, five→5)
+// ✅ Sistema completo de normalización de lenguaje natural (normalizaciones.js)
+// ✅ Cubre TODAS las variaciones comunes: madrugada/tarde/noche/mediodía
 // ✅ IA mejorada con mejor prompt y temperatura 0.3
 // ✅ Comando /debug_ia para testing sin crear alarmas
-// ✅ Mejor extracción de JSON de la IA
-// ✅ Logs detallados para debugging
 // ✅ Whisper mejorado con language="es", temperature=0, task="transcribe"
-// ✅ Validación de duración de audio (<60s)
-// ✅ Mejor manejo de errores en transcripción de voz
 // ✅ TODOS los botones, callbacks y QR intactos
 // ═══════════════════════════════════════════════════════════════════════════════
 
 import { DICCIONARIO } from './diccionario.js';
+import normalizarTextoCompleto from './normalizaciones.js';
 
 const SALTO_GRANDE = true;
 const NUM_SALTOS = 3;
@@ -56,167 +54,6 @@ function horaDefectoPorNota(nota) {
 
 function escapeHTML(str) {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-}
-
-// ─── 🆕 NORMALIZACIÓN MEJORADA ────────────────────────────────────────────────
-function normalizarTextoAvanzado(texto) {
-  return texto
-    // Typos comunes de "ponme/pon"
-    .replace(/\bpome\b/gi, 'ponme')
-    .replace(/\bpnme\b/gi, 'ponme')
-    .replace(/\bponame\b/gi, 'ponme')
-    .replace(/\bpomme\b/gi, 'ponme')
-    
-    // Typos de "alarma"
-    .replace(/\blasrma[s]?\b/gi, 'alarma')
-    .replace(/\balarmas?\b/gi, 'alarma')
-    .replace(/\balrma[s]?\b/gi, 'alarma')
-    
-    // Typos de "una"
-    .replace(/\bua\b/gi, 'una')
-    
-    // 🆕 Normalizar frases con espacios
-    .replace(/\bAvisa\s+me\b/gi, 'Avísame')
-    .replace(/\bavisa\s+me\b/gi, 'avísame')
-    .replace(/\brecuerda\s+me\b/gi, 'recuérdame')
-    .replace(/\bpon\s+me\b/gi, 'ponme')
-    
-    // 🆕 CRÍTICO: Normalizar "X y medio/cuarto" → "a las X:30/X:15"
-    // Esto DEBE hacerse ANTES de que llegue a la IA
-    .replace(/\b(\d{1,2})\s+y\s+medi[oa]\b/gi, 'a las $1:30')
-    .replace(/\b(\d{1,2})\s+y\s+cuarto\b/gi, 'a las $1:15')
-    
-    // 🆕 Convertir "de la tarde/noche" en horas 24h
-    .replace(/\b([1-9]|1[0-2])(?::(\d{2}))?\s+de\s+la\s+tarde\b/gi, (match, hora, minutos) => {
-      const h = parseInt(hora);
-      const nuevaHora = h < 12 ? h + 12 : h;
-      return minutos ? `a las ${nuevaHora}:${minutos}` : `a las ${nuevaHora}:00`;
-    })
-    .replace(/\b([1-9]|1[0-2])(?::(\d{2}))?\s+de\s+la\s+noche\b/gi, (match, hora, minutos) => {
-      const h = parseInt(hora);
-      const nuevaHora = h < 12 ? h + 12 : h;
-      return minutos ? `a las ${nuevaHora}:${minutos}` : `a las ${nuevaHora}:00`;
-    })
-    .replace(/\b([1-9]|1[0-2])(?::(\d{2}))?\s+de\s+la\s+ma[ñn]ana\b/gi, (match, hora, minutos) => {
-      return minutos ? `a las ${hora}:${minutos}` : `a las ${hora}:00`;
-    })
-    
-    // Números escritos con typos
-    .replace(/\bdies\b/gi, '10')
-    .replace(/\bdiez\b/gi, '10')
-    .replace(/\bdié s\b/gi, '10')
-    
-    // Mezcla inglés-español en números
-    .replace(/\bfive\b/gi, '5')
-    .replace(/\bsix\b/gi, '6')
-    .replace(/\bseven\b/gi, '7')
-    .replace(/\beight\b/gi, '8')
-    .replace(/\bnine\b/gi, '9')
-    .replace(/\bten\b/gi, '10')
-    .replace(/\beleven\b/gi, '11')
-    .replace(/\btwelve\b/gi, '12')
-    
-    // Quitar ruido (ANTES de procesar conectores)
-    .replace(/\bpero\b/gi, ' ')
-    .replace(/\btambien\b/gi, ' ')
-    .replace(/\btambién\b/gi, ' ')
-    .replace(/\bporfa\b/gi, ' ')
-    .replace(/\bporfavor\b/gi, ' ')
-    .replace(/\bvenga\b/gi, ' ')
-    .replace(/\boye\b/gi, ' ')
-    .replace(/\bbueno\b/gi, ' ')
-    .replace(/\bvale\b/gi, ' ')
-    .replace(/\besta\s+vez\b/gi, ' ')
-    .replace(/\bmejor\b/gi, ' ')
-    
-    // "y cuarto" → ":15" (ANTES de procesar números)
-    .replace(/\by\s+cuarto\b/gi, ':15')
-    
-    // "y media" → ":30"
-    .replace(/\by\s+media\b/gi, ':30')
-    
-    // Limpiar ", :XX" → ":XX" (cuando queda de "pero y cuarto")
-    .replace(/,\s*:(\d{2})/g, ':$1')
-    
-    // 🆕 MEJORADO: Detectar "a las X y Y" donde Y son minutos
-    // SOLO convertir a X:Y si Y > 23 (claramente minutos) o Y está entre 24-59
-    // Si Y ≤ 23, puede ser dos alarmas (ej: "a las 2 y 3" = 02:00 y 03:00)
-    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})(?=\s|,|$)/gi, (match, h, m) => {
-      const hora = parseInt(h);
-      const minuto = parseInt(m);
-      
-      const textoCompleto = arguments[3]; // El texto completo
-      
-      // NO convertir si hay indicios de múltiples fechas
-      const tieneMultiplesFechas = /(?:mañana|manana|hoy|pasado).*(?:y|,).*(?:mañana|manana|hoy|pasado)/i.test(textoCompleto);
-      
-      // Solo convertir a HH:MM si:
-      // 1. NO hay múltiples fechas en el texto
-      // 2. Los minutos son > 23 (claramente minutos: 30, 45, 50, etc.)
-      // 3. La hora es razonable (0-23)
-      if (!tieneMultiplesFechas && hora >= 0 && hora <= 23 && minuto > 23 && minuto <= 59) {
-        return `a las ${h}:${String(minuto).padStart(2, '0')}`;
-      }
-      
-      // Si minuto ≤ 23, puede ser dos horas diferentes → dejar sin tocar para IA
-      return match;
-    })
-    
-    // Detectar "a las X :YY" (cuando quedó separado)
-    .replace(/\ba\s+las\s+(\d{1,2})\s*:(\d{2})\b/gi, 'a las $1:$2')
-    
-    // Resto normalización original
-    .replace(/\bmñn\b/gi, 'mañana')
-    .replace(/\bmñana\b/gi, 'mañana')
-    .replace(/\bmannana\b/gi, 'mañana')
-    .replace(/\bmaiana\b/gi, 'mañana')
-    .replace(/\bmaniana\b/gi, 'mañana')
-    .replace(/\bmnaña\b/gi, 'mañana')
-    .replace(/\bpasao mañana\b/gi, 'pasado mañana')
-    .replace(/\bpasao manana\b/gi, 'pasado mañana')
-    .replace(/\bjue\b/gi, 'jueves')
-    .replace(/\bvie\b/gi, 'viernes')
-    .replace(/\bsab\b/gi, 'sábado')
-    .replace(/\bdom\b/gi, 'domingo')
-    .replace(/\blun\b/gi, 'lunes')
-    .replace(/\bmar\b/gi, 'martes')
-    .replace(/\bmie\b/gi, 'miércoles')
-    .replace(/\brecuerdame\b/gi, 'recuérdame')
-    .replace(/\bavisame\b/gi, 'avísame')
-    .replace(/\bxq\b/gi, 'porque')
-    .replace(/\bpq\b/gi, 'porque')
-    .replace(/\bq\b/gi, 'que')
-    .replace(/\bx\b/gi, 'por')
-    .replace(/\bpf\b/gi, 'por favor')
-    .replace(/\bxfa\b/gi, 'por favor')
-    .replace(/\bwsp\b/gi, 'whatsapp')
-    .replace(/\bmsj\b/gi, 'mensaje')
-    
-    // Números en palabras
-    .replace(/\bun[ao]\b/gi, '1')
-    .replace(/\bdos\b/gi, '2')
-    .replace(/\btres\b/gi, '3')
-    .replace(/\bcuatro\b/gi, '4')
-    .replace(/\bcinco\b/gi, '5')
-    .replace(/\bseis\b/gi, '6')
-    .replace(/\bsiete\b/gi, '7')
-    .replace(/\bocho\b/gi, '8')
-    .replace(/\bnueve\b/gi, '9')
-    .replace(/\bonce\b/gi, '11')
-    .replace(/\bdoce\b/gi, '12')
-    .replace(/\btrece\b/gi, '13')
-    .replace(/\bcatorce\b/gi, '14')
-    .replace(/\bquince\b/gi, '15')
-    .replace(/\bveinte\b/gi, '20')
-    .replace(/\bveintiuno\b/gi, '21')
-    .replace(/\bveintidos\b/gi, '22')
-    .replace(/\bveintitres\b/gi, '23')
-    // "las X" → "a las X"
-    .replace(/(?<![a-záéíóúñ])las\s+(\d{1,2})/gi, 'a las $1')
-    // Limpiar duplicados
-    .replace(/\ba\s+a\s+las\b/gi, 'a las')
-    .replace(/\s{2,}/g, ' ')
-    .trim();
 }
 
 // ─── TRADUCCIÓN ───────────────────────────────────────────────────────────────
@@ -1177,7 +1014,7 @@ async function processMessage(msg, env) {
   }
 
   // 🆕 USAR NORMALIZACIÓN MEJORADA (para procesamiento de alarmas)
-  const textNormalizado = normalizarTextoAvanzado(text);
+  const textNormalizado = normalizarTextoCompleto(text);
 
   const nombresDias = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
 
@@ -1251,7 +1088,7 @@ async function processMessage(msg, env) {
     await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🔍 <b>Analizando...</b>");
     
     // PASO 1: Normalización
-    const normalizado = normalizarTextoAvanzado(testTexto);
+    const normalizado = normalizarTextoCompleto(testTexto);
     await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
       `📝 <b>PASO 1: Normalización</b>\n\n<b>Original:</b>\n<code>${escapeHTML(testTexto)}</code>\n\n<b>Normalizado:</b>\n<code>${escapeHTML(normalizado)}</code>`
     );
