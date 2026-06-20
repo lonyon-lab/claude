@@ -21,6 +21,7 @@ const NOMBRES_MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio",
 const DIAS_POR_MES  = [31,28,31,30,31,30,31,31,30,31,30,31];
 const CLAVE_ALARMAS = "alarmas";
 const NOMBRES_DIAS  = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+const KEYCAPS       = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"];
 
 const PALABRAS_TIEMPO = [
   "lunes","martes","miércoles","miercoles","jueves","viernes","sábado","sabado","domingo",
@@ -642,17 +643,22 @@ function construirVistaLista(alarmas, pagina = 0) {
   if (totalPag > 1) texto += ` · pág. ${pagina + 1}/${totalPag}`;
   texto += `\n👇 Pulsa el <b>número</b> para gestionarla.\n`;
 
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
   const teclado = [];
   let fila = [];
   slice.forEach((al, i) => {
-    const n = pagina * PAGE + i + 1;
-    const fechaCorta = al.tipo === "semanal"
-      ? NOMBRES_DIAS[al.diaSemana].slice(0, 3)
-      : `${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)}`;
-    // Fecha/hora/cuenta atrás en una línea y la nota COMPLETA debajo
-    texto += `\n\n<b>${n}.</b> ${fechaCorta} · <b>${al.hora}:${al.minuto}</b> · ⏳ ${cuentaAtrasCorta(al)}`;
-    texto += `\n     📝 ${escapeHTML(al.nota)}`;
-    fila.push({ text: `${n}`, callback_data: `alarma_ver:${al.id}` });
+    const emoji = KEYCAPS[i] || `${i + 1}`;
+    let cabecera;
+    if (al.tipo === "semanal") {
+      cabecera = `🔄 ${NOMBRES_DIAS[al.diaSemana].slice(0, 3)} ${al.hora}:${al.minuto}`;
+    } else {
+      const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+      if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
+      const dia = NOMBRES_DIAS[fecha.getDay()].slice(0, 3);
+      cabecera = `${dia} ${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)} ${al.hora}:${al.minuto}`;
+    }
+    texto += `\n\n${emoji} ${cabecera} · ⏳${cuentaAtrasCorta(al)} · ${escapeHTML(al.nota)}`;
+    fila.push({ text: emoji, callback_data: `alarma_ver:${al.id}` });
     if (fila.length === 5) { teclado.push(fila); fila = []; }
   });
   if (fila.length) teclado.push(fila);
