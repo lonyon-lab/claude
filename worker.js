@@ -87,22 +87,37 @@ function normalizarTextoAvanzado(texto) {
     .replace(/\beleven\b/gi, '11')
     .replace(/\btwelve\b/gi, '12')
     
-    // Detectar "a las X y Y" donde Y podría ser minutos
-    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{1,2})(?!\s+y)/gi, (match, h, m) => {
-      const hora = parseInt(h);
-      const segundo = parseInt(m);
-      // Si el segundo número está entre 0-59, probablemente son minutos
-      if (segundo >= 0 && segundo <= 59) {
-        return `a las ${hora}:${segundo.toString().padStart(2, '0')}`;
+    // Quitar ruido (ANTES de procesar conectores)
+    .replace(/\bpero\b/gi, ' ')
+    .replace(/\btambien\b/gi, ' ')
+    .replace(/\btambién\b/gi, ' ')
+    .replace(/\bporfa\b/gi, ' ')
+    .replace(/\bporfavor\b/gi, ' ')
+    .replace(/\bvenga\b/gi, ' ')
+    .replace(/\boye\b/gi, ' ')
+    .replace(/\bbueno\b/gi, ' ')
+    .replace(/\bvale\b/gi, ' ')
+    .replace(/\besta\s+vez\b/gi, ' ')
+    .replace(/\bmejor\b/gi, ' ')
+    
+    // "y cuarto" → ":15" (ANTES de procesar números)
+    .replace(/\by\s+cuarto\b/gi, ':15')
+    
+    // "y media" → ":30"
+    .replace(/\by\s+media\b/gi, ':30')
+    
+    // Detectar "a las X y Y" donde Y son minutos de 2 dígitos (10-59)
+    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d{2})\b/gi, 'a las $1:$2')
+    
+    // Detectar "a las X y Y" donde Y son minutos de 1 dígito (1-9)
+    .replace(/\ba\s+las\s+(\d{1,2})\s+y\s+(\d)\b/gi, (match, h, m) => {
+      const minutos = parseInt(m);
+      // Solo si es 1-9 (no 10-23 que serían horas)
+      if (minutos >= 1 && minutos <= 9) {
+        return `a las ${h}:0${m}`;
       }
       return match;
     })
-    
-    // "y cuarto" → :15
-    .replace(/\by\s+cuarto\b/gi, ':15')
-    
-    // "y media" → :30
-    .replace(/\by\s+media\b/gi, ':30')
     
     // Resto normalización original
     .replace(/\bmñn\b/gi, 'mañana')
@@ -130,16 +145,7 @@ function normalizarTextoAvanzado(texto) {
     .replace(/\bxfa\b/gi, 'por favor')
     .replace(/\bwsp\b/gi, 'whatsapp')
     .replace(/\bmsj\b/gi, 'mensaje')
-    // Quitar ruido
-    .replace(/\bpero\b/gi, '')
-    .replace(/\btambien\b/gi, '')
-    .replace(/\btambién\b/gi, '')
-    .replace(/\bporfa\b/gi, '')
-    .replace(/\bporfavor\b/gi, '')
-    .replace(/\bvenga\b/gi, '')
-    .replace(/\boye\b/gi, '')
-    .replace(/\bbueno\b/gi, '')
-    .replace(/\bvale\b/gi, '')
+    
     // Números en palabras
     .replace(/\bun[ao]\b/gi, '1')
     .replace(/\bdos\b/gi, '2')
