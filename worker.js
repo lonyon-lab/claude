@@ -228,36 +228,36 @@ Pasado mañana: ${pasadoMananaNum} de ${pasadoManananMes}
 
 RESPONDE SOLO JSON VÁLIDO, SIN MARKDOWN NI EXPLICACIONES.
 
-IMPORTANTE FORMATO DE HORA:
-- "a las 10:12" significa las DIEZ y DOCE MINUTOS (10:12), NO dos alarmas separadas
-- "a las 12:15" significa las DOCE y QUINCE MINUTOS (12:15)
-- Solo son múltiples alarmas si hay "y" entre fechas diferentes
+⚠️ CRÍTICO - FORMATO DE HORA:
+- "a las 10 y 12" = UNA alarma a las 10:12 (hora:minuto), NO dos alarmas
+- "a las 12 y 15" = UNA alarma a las 12:15 (hora:minuto), NO dos alarmas  
+- "a las 10:12" = UNA alarma a las 10:12 (hora:minuto)
+- Solo son múltiples si hay fechas diferentes: "mañana... y pasado mañana..."
 
 EJEMPLOS:
+"mañana a las 10 y 12 reunión"
+→ {"esAlarma":true,"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"}
+
+"mañana a las 10 y 12 y pasado mañana a las 12 y 15"
+→ {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"},{"nota":"reunión","tipo":"unica","diaMes":${pasadoMananaNum},"mes":${pasadoMananasMes},"hora":"12","minuto":"15"}]}
+
 "recuérdame mañana a las 10 comprar pan"
 → {"esAlarma":true,"nota":"comprar pan","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"00"}
 
 "todos los lunes a las 8 gimnasio"
 → {"esAlarma":true,"nota":"gimnasio","tipo":"semanal","diaSemana":1,"hora":"08","minuto":"00"}
 
-"mañana a las 10:12 reunión"
-→ {"esAlarma":true,"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"}
-
-"mañana a las 10:12 y pasado mañana a las 12:15 reunión"
-→ {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"reunión","tipo":"unica","diaMes":${mananaNum},"mes":${mananasMes},"hora":"10","minuto":"12"},{"nota":"reunión","tipo":"unica","diaMes":${pasadoMananaNum},"mes":${pasadoMananasMes},"hora":"12","minuto":"15"}]}
-
 "el 5 y el 6 de julio despertador a las 7"
 → {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"despertador","tipo":"unica","diaMes":5,"mes":7,"hora":"07","minuto":"00"},{"nota":"despertador","tipo":"unica","diaMes":6,"mes":7,"hora":"07","minuto":"00"}]}
 
 REGLAS HORA:
 - Sin hora → contexto: médico/reunión→09:00, comida→12:00, gym→19:00, cena→21:00, defecto→10:00
-- "a las 10" → 10:00. "a las 10:30" → 10:30. "a las 10:15" → 10:15
+- "a las X y Y" donde Y≤59 → X:Y (hora y minutos)
 - "a las 4 de la tarde" → 16:00
 
 REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
 - "pasado mañana" → ${pasadoMananaNum}/${pasadoMananasMes}
-- "lunes/martes/etc" → próximo día de esa semana
 - Múltiples fechas → {"esAlarma":true,"multiple":true,"alarmas":[...]}
 
 FORMATO:
