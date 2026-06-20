@@ -519,8 +519,16 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     const resumen = nuevas.map(a =>
       `📅 <b>${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`
     ).join('\n');
-    await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
-      `✅ <b>¡${nuevas.length} alarmas guardadas!</b>\n\n${resumen}\n📝 <i>${escapeHTML(nuevas[0].nota)}</i>`
+    
+    // 🆕 Botones para editar cada alarma
+    const botones = nuevas.map(a => [{ 
+      text: `✏️ Editar "${a.nota.substring(0, 20)}${a.nota.length > 20 ? '...' : ''}"`, 
+      callback_data: `editar_desc:${a.id}` 
+    }]);
+    
+    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+      `✅ <b>¡${nuevas.length} alarmas guardadas!</b>\n\n${resumen}\n📝 <i>${escapeHTML(nuevas[0].nota)}</i>`,
+      botones
     );
     return;
   }
@@ -549,8 +557,13 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   } else {
     fechaTxt = `📅 El <b>${datos.diaMes} de ${NOMBRES_MESES[Number(datos.mes) - 1]}</b>`;
   }
-  await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`
+  
+  // 🆕 Agregar botón de editar descripción
+  const botones = [[{ text: "✏️ Editar descripción", callback_data: `editar_desc:${alarma.id}` }]];
+  
+  await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
+    botones
   );
 }
 
@@ -895,6 +908,36 @@ async function handleCallback(cb, env) {
       })
     });
   }
+  else if (data.startsWith("editar_desc:")) {
+    // 🆕 Editar descripción de alarma recién creada (mismo flujo que editar_nota)
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const alarma = alarmas.find(a => a.id === id);
+    if (!alarma) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", null);
+      return;
+    }
+    
+    // Guardar el ID de la alarma que se está editando
+    await env.ALARMAS_KV.put(`esperando_edicion_nota:${chatId}`, id);
+    
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
+      `✏️ <b>Editando descripción</b>\n\n📝 Descripción actual: <i>"${escapeHTML(alarma.nota)}"</i>\n\n💬 Escribe la nueva descripción:`,
+      [[{ text: "❌ Cancelar", callback_data: "cancelar_editar_nota" }]]
+    );
+    
+    // Enviar también un mensaje con respuesta forzada
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: "✏️ Escribe la nueva descripción:",
+        parse_mode: 'HTML',
+        reply_markup: { force_reply: true, input_field_placeholder: "Nueva descripción..." }
+      })
+    });
+  }
   else if (data === "cancelar_editar_nota") {
     await env.ALARMAS_KV.delete(`esperando_edicion_nota:${chatId}`);
     await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Edición cancelada. Usa /ver para ver tus alarmas.", null);
@@ -924,9 +967,11 @@ async function guardarNotaYFinalizar(env, chatId, messageId, nota) {
   const resumen = config.tipo === "semanal"
     ? `🔄 Todos los <b>${nombresDias[config.diaSemana]}</b>`
     : `📅 El <b>${config.diaMes} de ${NOMBRES_MESES[config.mes - 1]}</b>`;
+  
+  // 🆕 Agregar botón de editar descripción
   await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
     `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n📝 <i>${escapeHTML(config.nota)}</i>`,
-    null
+    [[{ text: "✏️ Editar descripción", callback_data: `editar_desc:${config.id}` }]]
   );
 }
 
