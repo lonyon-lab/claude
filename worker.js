@@ -1032,11 +1032,14 @@ async function processMessage(msg, env) {
       const textoTranscrito = transcription?.text || transcription?.vtt || "";
       
       if (!textoTranscrito || textoTranscrito.trim().length === 0) {
-        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ No pude entender el audio. ¿Puedes repetirlo?");
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ No pude entender el audio. ¿Puedes repetirlo más claro?");
         return;
       }
       
       console.log("🎤 Audio transcrito:", textoTranscrito);
+      
+      // 🆕 Mostrar transcripción al usuario para debugging
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, `🎤 <b>Transcribí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n⏳ Procesando...`);
       
       // Procesar el texto transcrito como si fuera un mensaje normal
       const msgSimulado = {
@@ -1051,7 +1054,7 @@ async function processMessage(msg, env) {
       
     } catch (e) {
       console.error("💥 Error procesando voz:", e);
-      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ Error procesando el audio. Inténtalo de nuevo o escribe el mensaje.");
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ Error procesando el audio.\n\n💡 <b>Sugerencia:</b> Intenta:\n• Hablar más despacio y claro\n• Reducir ruido de fondo\n• Escribir el mensaje en su lugar");
       return;
     }
   }
