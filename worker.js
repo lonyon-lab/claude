@@ -323,7 +323,7 @@ REGLAS HORA:
 REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
 - "pasado mañana" → ${pasadoMananaNum}/${pasadoMananasMes}
-- "esta madrugada" → si ahora es después de las 6 AM, significa mañana; si es antes de las 6 AM, significa hoy
+- "esta madrugada", "de madrugada", "la madrugada" → si ahora es después de las 6 AM, significa mañana; si es antes de las 6 AM, significa hoy
 - "hoy" → ${ahora.getDate()}/${ahora.getMonth()+1}
 - "dentro de X días" → calcular fecha sumando X días a hoy
 - "dentro de X o Y días" → usar diasAntesMin:X, diasAntesMax:Y, diasAntes:-1 (código elegirá aleatorio)
