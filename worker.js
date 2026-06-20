@@ -4,7 +4,8 @@
 // ✅ Cubre TODAS las variaciones comunes: madrugada/tarde/noche/mediodía
 // ✅ IA mejorada con mejor prompt y temperatura 0.3
 // ✅ Comando /debug_ia para testing sin crear alarmas
-// ✅ Whisper mejorado con language="es", temperature=0, task="transcribe"
+// ✅ Transcripción de voz con AssemblyAI (language_code="es") en lugar de Whisper
+//    Requiere la variable/secret ASSEMBLYAI_API_KEY en Cloudflare
 // ✅ TODOS los botones, callbacks y QR intactos
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -665,6 +666,68 @@ async function desplegarPanelNota(token, chatId, messageId) {
   await editMessage(token, chatId, messageId, "✍️ <b>Selecciona o escribe la nota del recordatorio:</b>", filas);
 }
 
+// ─── 🎤 TRANSCRIPCIÓN CON ASSEMBLYAI ──────────────────────────────────────────
+// Flujo AssemblyAI: 1) subir el audio  2) crear la transcripción  3) hacer polling
+// hasta que el estado sea "completed". Devuelve el texto transcrito (o "" si falla).
+async function transcribirConAssemblyAI(audioBuffer, apiKey) {
+  const BASE = "https://api.assemblyai.com/v2";
+  const headers = { authorization: apiKey };
+
+  // 1) Subir el audio (cuerpo binario directo)
+  const uploadRes = await fetch(`${BASE}/upload`, {
+    method: "POST",
+    headers,
+    body: audioBuffer
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`AssemblyAI upload falló: ${uploadRes.status} ${await uploadRes.text()}`);
+  }
+  const { upload_url } = await uploadRes.json();
+  if (!upload_url) throw new Error("AssemblyAI no devolvió upload_url");
+
+  // 2) Crear la transcripción en español
+  const createRes = await fetch(`${BASE}/transcript`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({
+      audio_url: upload_url,
+      language_code: "es",       // 🆕 Español
+      punctuate: true,
+      format_text: true
+    })
+  });
+  if (!createRes.ok) {
+    throw new Error(`AssemblyAI transcript falló: ${createRes.status} ${await createRes.text()}`);
+  }
+  const created = await createRes.json();
+  const transcriptId = created.id;
+  if (!transcriptId) throw new Error("AssemblyAI no devolvió id de transcripción");
+
+  // 3) Polling hasta "completed" (máx ~55s para no exceder límites del Worker)
+  const inicio = Date.now();
+  const TIMEOUT_MS = 55000;
+  const INTERVALO_MS = 2000;
+
+  while (Date.now() - inicio < TIMEOUT_MS) {
+    const pollRes = await fetch(`${BASE}/transcript/${transcriptId}`, { headers });
+    if (!pollRes.ok) {
+      throw new Error(`AssemblyAI polling falló: ${pollRes.status} ${await pollRes.text()}`);
+    }
+    const data = await pollRes.json();
+
+    if (data.status === "completed") {
+      return (data.text || "").trim();
+    }
+    if (data.status === "error") {
+      throw new Error(`AssemblyAI error: ${data.error}`);
+    }
+    // status "queued" o "processing" → esperar y reintentar
+    await new Promise(r => setTimeout(r, INTERVALO_MS));
+  }
+
+  throw new Error("AssemblyAI: tiempo de espera agotado (timeout)");
+}
+
 // ─── EXPORT DEFAULT ───────────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -1098,17 +1161,18 @@ async function processMessage(msg, env) {
       const audioRes = await fetch(audioUrl);
       const audioBuffer = await audioRes.arrayBuffer();
       
-      // Usar Cloudflare AI Whisper con configuración mejorada
+      // 🆕 Validar que existe la API key de AssemblyAI
+      if (!env.ASSEMBLYAI_API_KEY) {
+        console.error("❌ Falta el secret ASSEMBLYAI_API_KEY");
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
+          "❌ Configuración incompleta: falta la clave de AssemblyAI.");
+        return;
+      }
+      
+      // 🆕 Transcribir con AssemblyAI
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🎤 Transcribiendo audio...");
       
-      const transcription = await env.AI.run("@cf/openai/whisper", {
-        audio: Array.from(new Uint8Array(audioBuffer)),
-        language: "es",           // 🆕 Especificar español
-        temperature: 0.0,         // 🆕 Más determinístico = más preciso
-        task: "transcribe"        // 🆕 Tarea explícita (no traducción)
-      });
-      
-      const textoTranscrito = (transcription?.text || transcription?.vtt || "").trim();
+      const textoTranscrito = await transcribirConAssemblyAI(audioBuffer, env.ASSEMBLYAI_API_KEY);
       
       if (!textoTranscrito || textoTranscrito.length === 0) {
         await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
