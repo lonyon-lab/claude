@@ -480,6 +480,49 @@ async function enviarAlarma(token, chatId, alarma, textoAlarma) {
   return await enviarTextoSimple(token, chatId, textoAlarma);
 }
 
+// ─── 🆕 CUENTA ATRÁS ──────────────────────────────────────────────────────────
+// Devuelve un texto tipo "⏳ Faltan 2 días, 5 horas y 10 minutos" calculando el
+// tiempo restante hasta que suene la alarma (zona horaria Atlantic/Canary).
+function calcularCuentaAtras(alarma) {
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const hh = parseInt(alarma.hora);
+  const mm = parseInt(alarma.minuto);
+  let target;
+
+  if (alarma.tipo === "semanal") {
+    const diaObjetivo = Number(alarma.diaSemana);
+    target = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), hh, mm, 0, 0);
+    let diff = (diaObjetivo - ahora.getDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= ahora.getTime()) diff = 7; // hoy pero ya pasó → próxima semana
+    target.setDate(target.getDate() + diff);
+  } else {
+    target = new Date(ahora.getFullYear(), Number(alarma.mes) - 1, Number(alarma.diaMes), hh, mm, 0, 0);
+    if (target.getTime() < ahora.getTime()) target.setFullYear(target.getFullYear() + 1); // ya pasó este año
+  }
+
+  let ms = target.getTime() - ahora.getTime();
+  if (ms < 0) ms = 0;
+
+  const totalMin = Math.round(ms / 60000);
+  const dias    = Math.floor(totalMin / 1440);
+  const horas   = Math.floor((totalMin % 1440) / 60);
+  const minutos = totalMin % 60;
+
+  const partes = [];
+  if (dias > 0)    partes.push(`${dias} ${dias === 1 ? "día" : "días"}`);
+  if (horas > 0)   partes.push(`${horas} ${horas === 1 ? "hora" : "horas"}`);
+  if (minutos > 0) partes.push(`${minutos} ${minutos === 1 ? "minuto" : "minutos"}`);
+
+  if (partes.length === 0) return "⏳ <b>Suena en menos de 1 minuto</b>";
+
+  let texto;
+  if (partes.length === 1)      texto = partes[0];
+  else if (partes.length === 2) texto = `${partes[0]} y ${partes[1]}`;
+  else                          texto = `${partes[0]}, ${partes[1]} y ${partes[2]}`;
+
+  return `⏳ <b>Faltan ${texto}</b>`;
+}
+
 // ─── GUARDAR ALARMA DESDE IA ──────────────────────────────────────────────────
 async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   const alarmas = await leerAlarmas(env);
@@ -521,8 +564,8 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     const resumen = nuevas.map(a => {
       const fecha = new Date(new Date().getFullYear(), a.mes - 1, a.diaMes);
       const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
-      return `📅 <b>El ${diaSemana} ${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`;
-    }).join('\n');
+      return `📅 <b>El ${diaSemana} ${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>\n${calcularCuentaAtras(a)}`;
+    }).join('\n\n');
     
     // 🆕 Botones para editar cada alarma
     const botones = nuevas.map(a => [{ 
@@ -569,7 +612,7 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   const botones = [[{ text: "✏️ Editar descripción", callback_data: `editar_desc:${alarma.id}` }]];
   
   await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
+    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n${calcularCuentaAtras(alarma)}\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
     botones
   );
 }
@@ -1122,7 +1165,7 @@ async function guardarNotaYFinalizar(env, chatId, messageId, nota) {
   
   // 🆕 Agregar botón de editar descripción
   await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n📝 <i>${escapeHTML(config.nota)}</i>`,
+    `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n${calcularCuentaAtras(config)}\n📝 <i>${escapeHTML(config.nota)}</i>`,
     [[{ text: "✏️ Editar descripción", callback_data: `editar_desc:${config.id}` }]]
   );
 }
