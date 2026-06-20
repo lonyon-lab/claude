@@ -5,6 +5,9 @@
 // ✅ Comando /debug_ia para testing sin crear alarmas
 // ✅ Mejor extracción de JSON de la IA
 // ✅ Logs detallados para debugging
+// ✅ Whisper mejorado con language="es", temperature=0, task="transcribe"
+// ✅ Validación de duración de audio (<60s)
+// ✅ Mejor manejo de errores en transcripción de voz
 // ✅ TODOS los botones, callbacks y QR intactos
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1036,9 +1039,16 @@ async function processMessage(msg, env) {
   const chatId  = msg.chat.id;
   const msgId   = msg.message_id;
   
-  // 🆕 SOPORTE DE MENSAJES DE VOZ
+  // 🆕 SOPORTE DE MENSAJES DE VOZ CON WHISPER MEJORADO
   if (msg.voice) {
     try {
+      // Validar duración del audio (max 60 segundos recomendado)
+      if (msg.voice.duration > 60) {
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+          "⏱️ El audio es muy largo (>60s).\n💡 Intenta con mensajes más cortos para mejor precisión.");
+        return;
+      }
+      
       // Obtener info del archivo de voz
       const fileInfoRes = await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/getFile?file_id=${msg.voice.file_id}`);
       const fileInfo = await fileInfoRes.json();
@@ -1055,61 +1065,48 @@ async function processMessage(msg, env) {
       const audioRes = await fetch(audioUrl);
       const audioBuffer = await audioRes.arrayBuffer();
       
-      // Usar Cloudflare AI para transcribir (Whisper)
+      // Usar Cloudflare AI Whisper con configuración mejorada
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🎤 Transcribiendo audio...");
       
       const transcription = await env.AI.run("@cf/openai/whisper", {
-        audio: Array.from(new Uint8Array(audioBuffer))
+        audio: Array.from(new Uint8Array(audioBuffer)),
+        language: "es",           // 🆕 Especificar español
+        temperature: 0.0,         // 🆕 Más determinístico = más preciso
+        task: "transcribe"        // 🆕 Tarea explícita (no traducción)
       });
       
-      const textoTranscrito = transcription?.text || transcription?.vtt || "";
+      const textoTranscrito = (transcription?.text || transcription?.vtt || "").trim();
       
-      if (!textoTranscrito || textoTranscrito.trim().length === 0) {
-        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ No pude entender el audio. ¿Puedes repetirlo más claro?");
+      if (!textoTranscrito || textoTranscrito.length === 0) {
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+          "❌ No pude entender el audio.\n\n💡 <b>Consejos:</b>\n• Habla claro y despacio\n• Evita ruido de fondo\n• Mantén el audio corto (<30s)\n• O escríbelo en su lugar");
         return;
       }
       
       console.log("🎤 Audio transcrito:", textoTranscrito);
+      console.log("🎤 Duración:", msg.voice.duration, "s");
       
-      // 🆕 Mostrar transcripción al usuario para debugging
-      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, `🎤 <b>Transcribí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n⏳ Procesando...`);
+      // 🆕 Mostrar transcripción al usuario
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+        `🎤 <b>Transcribí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n⏳ Procesando...`);
       
-      // Procesar el texto transcrito
-      try {
-        // Normalizar el texto transcrito
-        const textoNormalizado = normalizarTextoAvanzado(textoTranscrito);
-        
-        // Intentar con regex primero
-        const tiempoRelativo = detectarTiempoRelativo(textoNormalizado);
-        if (tiempoRelativo) {
-          // El regex lo detectó, procesar normalmente
-          const msgSimulado = {
-            ...msg,
-            text: textoTranscrito,
-            voice: undefined
-          };
-          await processMessage(msgSimulado, env);
-          return;
-        }
-        
-        // Si regex no detectó, intentar con IA
-        const datos = await interpretarAlarmaConIA(textoNormalizado, env.AI);
-        
-        if (!datos || !datos.esAlarma) {
-          // IA no entendió el texto
-          await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
-            `❌ <b>No entendí:</b> <i>"${escapeHTML(textoTranscrito)}"</i>\n\n💡 <b>Sugerencia:</b> Intenta:\n• Una frase más simple\n• Ejemplo: "alarma mañana a las 10"\n• O escríbelo en su lugar`
-          );
-          return;
-        }
-        
-        // IA entendió, procesar normalmente
-        const msgSimulado = {
-          ...msg,
-          text: textoTranscrito,
-          voice: undefined
-        };
-        await processMessage(msgSimulado, env);
+      // 🆕 Ahora procesar como texto normal (sin recursión infinita)
+      // Simplemente asignar el texto transcrito y continuar el flujo
+      msg.text = textoTranscrito;
+      delete msg.voice; // Eliminar voz para que no vuelva a procesarse
+      
+      // El flujo continuará abajo en el procesamiento de texto normal
+      
+    } catch (voiceError) {
+      console.error("💥 Error en transcripción de voz:", voiceError);
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+        `❌ Error al procesar el audio.\n\n💡 <b>Sugerencia:</b> Intenta:\n• Enviar un audio más corto\n• Hablar más claro y pausado\n• Escribir el mensaje en su lugar`);
+      return;
+    }
+  }
+
+  // ─── PROCESAR TEXTO (tanto directo como transcrito) ─────────────────────────
+  const text = msg.text;
         
       } catch (processingError) {
         console.error("💥 Error procesando transcripción:", processingError);
@@ -1119,20 +1116,28 @@ async function processMessage(msg, env) {
       }
       return;
       
-    } catch (e) {
-      console.error("💥 Error procesando voz:", e);
-      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ Error procesando el audio.\n\n💡 <b>Sugerencia:</b> Intenta:\n• Hablar más despacio y claro\n• Reducir ruido de fondo\n• Escribir el mensaje en su lugar");
+    } catch (voiceError) {
+      console.error("💥 Error en transcripción de voz:", voiceError);
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+        `❌ Error al procesar el audio.\n\n💡 <b>Sugerencia:</b> Intenta:\n• Enviar un audio más corto\n• Hablar más claro y pausado\n• Escribir el mensaje en su lugar`);
       return;
     }
   }
-  
-  const textRaw = (msg.text || msg.caption || '').trim();
 
-  // 🆕 USAR NORMALIZACIÓN MEJORADA
-  const text = normalizarTextoAvanzado(textRaw);
+  // ─── PROCESAR TEXTO (tanto directo como transcrito) ─────────────────────────
+  const text = msg.text;
+
+  if (!text) {
+    // Si no hay texto ni voz, ignorar
+    return;
+  }
+
+  // 🆕 USAR NORMALIZACIÓN MEJORADA (para procesamiento de alarmas)
+  const textNormalizado = normalizarTextoAvanzado(text);
 
   const nombresDias = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
 
+  // Los comandos usan 'text' sin normalizar
   if (text === '/alarma') {
     await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
       "⏰ <b>ASISTENTE DE ALARMAS</b>\n\nUsa los botones o escríbeme el recordatorio directamente.\n\n<i>Ej: «el 5 y el 6 de julio pon despertador a las 7»</i>",
@@ -1297,9 +1302,10 @@ async function processMessage(msg, env) {
 
   if (!text.startsWith('/') && text.length > 3) {
     console.log("📥 TEXTO RECIBIDO:", text); // 🆕 Log inicial
+    console.log("📝 TEXTO NORMALIZADO:", textNormalizado); // 🆕 Log normalizado
     
-    // Capa 1: Regex tiempo relativo
-    const tiempoRelativo = detectarTiempoRelativo(text);
+    // Capa 1: Regex tiempo relativo (con texto normalizado)
+    const tiempoRelativo = detectarTiempoRelativo(textNormalizado);
     console.log("🔍 Regex resultado:", tiempoRelativo ? "DETECTADO" : "null"); // 🆕 Log
     
     if (tiempoRelativo) {
@@ -1323,8 +1329,8 @@ async function processMessage(msg, env) {
     }
 
     console.log("🤖 Llamando a IA..."); // 🆕 Log
-    // Capa 2: IA
-    const datos = await interpretarAlarmaConIA(text, env.AI);
+    // Capa 2: IA (con texto normalizado)
+    const datos = await interpretarAlarmaConIA(textNormalizado, env.AI);
     if (!datos || !datos.esAlarma) {
       if (tieneLinks) await generarQRs(text, env.TELEGRAM_TOKEN, chatId, msgId);
       return;
@@ -1332,7 +1338,7 @@ async function processMessage(msg, env) {
 
     // 🆕 Ambigüedad mañana en madrugada (ahora también para múltiples)
     const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
-    if (detectarAmbiguedadManana(text, ahora)) {
+    if (detectarAmbiguedadManana(textNormalizado, ahora)) {
       const diasSemana = ["domingo","lunes","martes","miércoles","jueves","viernes","sábado"];
       const manana = new Date(ahora.getTime() + 86400000);
       const dHoy = ahora.getDate(), mHoy = ahora.getMonth() + 1;
