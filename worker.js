@@ -964,6 +964,39 @@ async function handleCallback(cb, env) {
   else if (data === "cancelar_borrar") {
     await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Borrado cancelado. Usa /ver para listarlas de nuevo.", null);
   }
+  else if (data.startsWith("editar_nota:")) {
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const alarma = alarmas.find(a => a.id === id);
+    if (!alarma) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", null);
+      return;
+    }
+    
+    // Guardar el ID de la alarma que se está editando
+    await env.ALARMAS_KV.put(`esperando_edicion_nota:${chatId}`, id);
+    
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
+      `✏️ <b>Editar nota</b>\n\nNota actual: <i>${escapeHTML(alarma.nota)}</i>\n\nEscribe la nueva nota:`,
+      [[{ text: "❌ Cancelar", callback_data: "cancelar_editar_nota" }]]
+    );
+    
+    // Enviar también un mensaje con respuesta forzada
+    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text: "✏️ Escribe la nueva nota:",
+        parse_mode: 'HTML',
+        reply_markup: { force_reply: true, selective: true }
+      })
+    });
+  }
+  else if (data === "cancelar_editar_nota") {
+    await env.ALARMAS_KV.delete(`esperando_edicion_nota:${chatId}`);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Edición cancelada. Usa /ver para ver tus alarmas.", null);
+  }
 
   await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/answerCallbackQuery?callback_query_id=${cb.id}`);
 }
@@ -1121,7 +1154,10 @@ async function processMessage(msg, env) {
         : `📅 El <b>${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
       await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
         `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n📝 <i>${escapeHTML(al.nota)}</i>`,
-        [[{ text: "❌ Borrar esta alarma", callback_data: `preguntar_borrar:${al.id}` }]]
+        [
+          [{ text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` }],
+          [{ text: "❌ Borrar esta alarma", callback_data: `preguntar_borrar:${al.id}` }]
+        ]
       );
     }
     return;
@@ -1209,6 +1245,44 @@ async function processMessage(msg, env) {
   const esperandoNotaMsgId = await env.ALARMAS_KV.get(`esperando_nota:${chatId}`);
   if (esperandoNotaMsgId && !text.startsWith('/')) {
     await guardarNotaYFinalizar(env, chatId, parseInt(esperandoNotaMsgId), text);
+    return;
+  }
+  
+  // 🆕 Manejar edición de nota de alarma existente
+  const esperandoEdicionId = await env.ALARMAS_KV.get(`esperando_edicion_nota:${chatId}`);
+  if (esperandoEdicionId && !text.startsWith('/')) {
+    const alarmas = await leerAlarmas(env);
+    const alarma = alarmas.find(a => a.id === esperandoEdicionId);
+    
+    if (!alarma) {
+      await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "❌ Esta alarma ya no existe.");
+      await env.ALARMAS_KV.delete(`esperando_edicion_nota:${chatId}`);
+      return;
+    }
+    
+    // Actualizar la nota
+    const notaAnterior = alarma.nota;
+    alarma.nota = text;
+    
+    // Buscar nueva foto basada en la nota
+    const ruido = ["el","la","los","las","un","una","de","del","al","para","con","en","por","y","o","mi","tu"];
+    const palabrasClave = text.toLowerCase().split(/\s+/).filter(p => !ruido.includes(p) && p.length > 2);
+    const terminoIngles = await traducirAlIngles(palabrasClave.join(" ") || text);
+    const fotoPexels = await buscarFotoPexels(terminoIngles, env.PEXELS_API_KEY);
+    if (fotoPexels) alarma.fotoUrl = fotoPexels;
+    
+    // Guardar cambios
+    await guardarAlarmas(env, alarmas);
+    await env.ALARMAS_KV.delete(`esperando_edicion_nota:${chatId}`);
+    
+    const nombresDias = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+    const fechaTxt = alarma.tipo === "semanal"
+      ? `🔄 Todos los <b>${nombresDias[alarma.diaSemana]}</b>`
+      : `📅 El <b>${alarma.diaMes} de ${NOMBRES_MESES[alarma.mes - 1]}</b>`;
+    
+    await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
+      `✅ <b>¡Nota actualizada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n\n📝 Antes: <i>${escapeHTML(notaAnterior)}</i>\n📝 Ahora: <i>${escapeHTML(alarma.nota)}</i>`
+    );
     return;
   }
 
