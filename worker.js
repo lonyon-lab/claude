@@ -516,9 +516,12 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     
     console.log("✅ Total alarmas después de guardar:", alarmas.length); // 🆕 Debug
 
-    const resumen = nuevas.map(a =>
-      `📅 <b>${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`
-    ).join('\n');
+    // 🆕 Calcular día de la semana para cada alarma
+    const resumen = nuevas.map(a => {
+      const fecha = new Date(new Date().getFullYear(), a.mes - 1, a.diaMes);
+      const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
+      return `📅 <b>El ${diaSemana} ${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`;
+    }).join('\n');
     
     // 🆕 Botones para editar cada alarma
     const botones = nuevas.map(a => [{ 
@@ -555,7 +558,10 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   if (datos.tipo === "semanal") {
     fechaTxt = `🔄 Todos los <b>${nombresDias[Number(datos.diaSemana)]}</b>`;
   } else {
-    fechaTxt = `📅 El <b>${datos.diaMes} de ${NOMBRES_MESES[Number(datos.mes) - 1]}</b>`;
+    // 🆕 Agregar día de la semana
+    const fecha = new Date(new Date().getFullYear(), datos.mes - 1, datos.diaMes);
+    const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
+    fechaTxt = `📅 El <b>${diaSemana} ${datos.diaMes} de ${NOMBRES_MESES[Number(datos.mes) - 1]}</b>`;
   }
   
   // 🆕 Agregar botón de editar descripción
@@ -964,9 +970,15 @@ async function guardarNotaYFinalizar(env, chatId, messageId, nota) {
   await env.ALARMAS_KV.delete(`esperando_nota:${chatId}`);
 
   const nombresDias = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
-  const resumen = config.tipo === "semanal"
-    ? `🔄 Todos los <b>${nombresDias[config.diaSemana]}</b>`
-    : `📅 El <b>${config.diaMes} de ${NOMBRES_MESES[config.mes - 1]}</b>`;
+  let resumen = "";
+  if (config.tipo === "semanal") {
+    resumen = `🔄 Todos los <b>${nombresDias[config.diaSemana]}</b>`;
+  } else {
+    // 🆕 Agregar día de la semana
+    const fecha = new Date(new Date().getFullYear(), config.mes - 1, config.diaMes);
+    const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
+    resumen = `📅 El <b>${diaSemana} ${config.diaMes} de ${NOMBRES_MESES[config.mes - 1]}</b>`;
+  }
   
   // 🆕 Agregar botón de editar descripción
   await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
