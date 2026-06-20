@@ -1183,7 +1183,7 @@ async function processMessage(msg, env) {
       // Si la fecha ya pasó este año, considerar año siguiente
       if (fechaA < ahora) fechaA.setFullYear(fechaA.getFullYear() + 1);
       if (fechaB < ahora) fechaB.setFullYear(fechaB.getFullYear() + 1);
-      return fechaA - fechaB;
+      return fechaA.getTime() - fechaB.getTime();
     });
     
     // Agrupar por categorías temporales
