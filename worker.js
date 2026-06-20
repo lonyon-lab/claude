@@ -514,7 +514,7 @@ function detectarTiempoRelativo(texto) {
 
   // Nota limpia
   const notaLimpia = texto
-    .replace(/(?:dentr[oa]\s*e?\s+|dento\s+de\s+|en\s+|pasad[ao]s?\s+)\s*(?:un\s+par\s+de\s+|unos\s+|\d+\s+o\s+\d+\s+|una\s+|dos\s+|tres\s+|\d+\s+)?(?:media\s+hora|hora[s]?\s+y\s+media|hora[s]?|minutos?|min[s]?|d[ií]as?|semanas?)/gi, '')
+    .replace(/(?:dentr[oa]\s*e?\s+|dento\s+de\s+|en\s+|pasad[ao]s?\s+)\s*(?:un\s+par\s+de\s+|unos\s+|\d+\s+o\s+\d+\s+|una\s+|dos\s+|tres\s+|\d+\s+)?(?:media\s+hora|hora[s]?\s+y\s+media|hora[s]?|hours?|minutos?|minutes?|min[s]?|d[ií]as?|days?|semanas?|weeks?)/gi, '')
     .replace(/(?:pasado\s+)?ma[ñn]ana/gi, '')
     .replace(/hoy/gi, '')
     .replace(/a\s+las\s+\d{1,2}(?:[:：]\d{2}|\s+y\s+(?:media|cuarto|\d{1,2}))?/gi, '')
