@@ -538,9 +538,9 @@ function detectarTiempoRelativo(texto) {
   } else if (/\bma[ñn]ana\b/.test(normalizado) && !/de la ma[ñn]ana|por la ma[ñn]ana/.test(normalizado)) {
     diasASumar = 1;
   // ── "esta madrugada" ──────────────────────────────────────────────────────
-  } else if (/esta\s+madrugada|de\s+madrugada/.test(normalizado)) {
-    // Si ahora son más de las 6 AM, "de madrugada" = mañana de madrugada
-    // Si son menos de las 6 AM, "de madrugada" = hoy (aún estamos en madrugada)
+  } else if (/esta\s+madrugada|de\s+madrugada|la\s+madrugada|en\s+la\s+madrugada/.test(normalizado)) {
+    // Si ahora son más de las 6 AM, "madrugada" = mañana de madrugada
+    // Si son menos de las 6 AM, "madrugada" = hoy (aún estamos en madrugada)
     diasASumar = ahora.getHours() >= 6 ? 1 : 0;
   // ── "hoy" con hora explícita ──────────────────────────────────────────────
   } else if (/\bhoy\b/.test(normalizado)) {
