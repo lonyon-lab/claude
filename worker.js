@@ -1079,9 +1079,14 @@ async function processMessage(msg, env) {
   }
 
   if (!text.startsWith('/') && text.length > 3) {
+    console.log("📥 TEXTO RECIBIDO:", text); // 🆕 Log inicial
+    
     // Capa 1: Regex tiempo relativo
     const tiempoRelativo = detectarTiempoRelativo(text);
+    console.log("🔍 Regex resultado:", tiempoRelativo ? "DETECTADO" : "null"); // 🆕 Log
+    
     if (tiempoRelativo) {
+      console.log("📊 Regex datos:", JSON.stringify(tiempoRelativo)); // 🆕 Log
       if (tiempoRelativo.esMultiple) {
         // Múltiples fechas (ej: mañana y pasado mañana)
         await guardarAlarmaDesdeIA({
@@ -1100,6 +1105,7 @@ async function processMessage(msg, env) {
       return;
     }
 
+    console.log("🤖 Llamando a IA..."); // 🆕 Log
     // Capa 2: IA
     const datos = await interpretarAlarmaConIA(text, env.AI);
     if (!datos || !datos.esAlarma) {
