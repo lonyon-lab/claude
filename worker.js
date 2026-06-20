@@ -383,6 +383,16 @@ function detectarTiempoRelativo(texto) {
   // ── "hoy" con hora explícita ──────────────────────────────────────────────
   } else if (/\bhoy\b/.test(normalizado)) {
     diasASumar = 0;
+  // ── 🆕 Día de la semana por nombre (ej: "el lunes a las 4 y 37") ───────────
+  //    Se excluye "todos los"/"cada" para que las alarmas semanales las maneje la IA.
+  } else if (/\b(lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[aá]bado|sabado|domingo)\b/.test(normalizado)
+             && !/todos\s+los|todas\s+las|cada\b/.test(normalizado)) {
+    const mapaDias = { domingo:0, lunes:1, martes:2, "miércoles":3, miercoles:3, jueves:4, viernes:5, "sábado":6, sabado:6 };
+    const md = normalizado.match(/\b(lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[aá]bado|sabado|domingo)\b/);
+    const objetivo = mapaDias[md[1]];
+    let diff = (objetivo - ahora.getDay() + 7) % 7;
+    if (diff === 0) diff = 7; // si hoy es ese día, se entiende el de la próxima semana
+    diasASumar = diff;
   }
 
   if (minutosASumar === null && diasASumar === null) return null;
@@ -423,28 +433,44 @@ function detectarTiempoRelativo(texto) {
     }
   }
 
+  // 🆕 Nota explícita: si el usuario dice "nota ..." o "nota: ...", usar lo que sigue
+  let notaExplicita = null;
+  const matchNota = texto.match(/\bnota\b\s*[:\-]?\s*(.+)$/i);
+  if (matchNota && matchNota[1].trim()) {
+    notaExplicita = matchNota[1].replace(/[.\s]+$/, '').trim();
+  }
+
   // Nota limpia
   const notaLimpia = texto
+    .replace(/\bnota\b\s*[:\-]?\s*.*$/i, '')          // 🆕 quitar "nota ..." del final
     .replace(/(?:dentr[oa]\s*e?\s+|dento\s+de\s+|en\s+|pasad[ao]s?\s+)\s*(?:un\s+par\s+de\s+|unos\s+|\d+\s+o\s+\d+\s+|una\s+|dos\s+|tres\s+|\d+\s+)?(?:media\s+hora|hora[s]?\s+y\s+media|hora[s]?|hours?|minutos?|minutes?|min[s]?|d[ií]as?|days?|semanas?|weeks?)/gi, '')
     .replace(/(?:pasado\s+)?ma[ñn]ana/gi, '')
     .replace(/hoy/gi, '')
+    .replace(/\b(lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[aá]bado|sabado|domingo)\b/gi, '') // 🆕 día de la semana
     .replace(/a\s+las\s+\d{1,2}(?:[:：]\d{2}|\s+y\s+(?:media|cuarto|\d{1,2}))?/gi, '')
+    .replace(/quiero\s+que/gi, '')                     // 🆕
+    .replace(/\b(me\s+)?av[ií]s\w*/gi, '')             // 🆕 avísame/avises/avisa
     .replace(/alarma/gi, '')
     .replace(/pon(?:me|e)?/gi, '')
-    .replace(/recuerd[ao]me/gi, '')
+    .replace(/recu[eé]rd[ao]me/gi, '')                 // 🆕 recuérdame/recuerdame
     .replace(/av[ií]same/gi, '')
     .replace(/despertador/gi, 'Despertador')
     .replace(/\d+\s+de\s+[a-záéíóúñ]+/gi, '')
+    .replace(/\ba\s+las\b/gi, '')                       // 🆕 restos de "a las"
+    .replace(/\s{2,}/g, ' ')                            // 🆕 colapsar espacios
     .replace(/^[,\s]+|[,\s]+$/g, '')
+    .replace(/^(el|la|los|las|al)\s+/i, '')            // 🆕 artículo inicial sobrante
     .trim() || "Recordatorio";
 
+  const notaFinal = notaExplicita || notaLimpia;
+
   if (hora === null) {
-    const def = horaDefectoPorNota(notaLimpia);
+    const def = horaDefectoPorNota(notaFinal);
     hora   = def.hora;
     minuto = def.minuto;
   }
 
-  return { hora, minuto, diaMes: dia, mes, nota: notaLimpia };
+  return { hora, minuto, diaMes: dia, mes, nota: notaFinal };
 }
 
 function pareceTenerIntencionDeTiempo(texto) {
