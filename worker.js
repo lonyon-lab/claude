@@ -232,6 +232,7 @@ RESPONDE SOLO JSON VÁLIDO, SIN MARKDOWN NI EXPLICACIONES.
 - "a las 10 y 12" = UNA alarma a las 10:12 (hora:minuto), NO dos alarmas
 - "a las 12 y 15" = UNA alarma a las 12:15 (hora:minuto), NO dos alarmas  
 - "a las 10:12" = UNA alarma a las 10:12 (hora:minuto)
+- "10 o 12 días" = rango de días (elegir uno entre 10-12), NO es hora 10:12
 - Solo son múltiples si hay fechas diferentes: "mañana... y pasado mañana..."
 
 EJEMPLOS:
@@ -253,6 +254,9 @@ EJEMPLOS:
 "el 1 de julio a las 11 y el día antes a las 8"
 → {"esAlarma":true,"multiple":true,"alarmas":[{"nota":"recordatorio","tipo":"unica","diaMes":1,"mes":7,"hora":"11","minuto":"00"},{"nota":"recordatorio","tipo":"unica","diaMes":1,"mes":7,"diasAntes":1,"hora":"08","minuto":"00"}]}
 
+"tengo boda dentro de 10 o 12 días, ponme alarma unos días antes"
+→ {"esAlarma":true,"nota":"boda","tipo":"unica","diaMes":2,"mes":7,"diasAntes":3,"hora":"10","minuto":"00"}
+
 REGLAS HORA:
 - Sin hora → contexto: médico/reunión→09:00, comida→12:00, gym→19:00, cena→21:00, defecto→10:00
 - "a las X y Y" donde Y≤59 → X:Y (hora y minutos)
@@ -261,7 +265,10 @@ REGLAS HORA:
 REGLAS FECHA:
 - "mañana" → ${mananaNum}/${mananasMes}
 - "pasado mañana" → ${pasadoMananaNum}/${pasadoMananasMes}
+- "dentro de X días" → calcular fecha sumando X días a hoy
+- "dentro de X o Y días" → elegir aleatoriamente entre X e Y, luego sumar a hoy
 - "el día antes" → usa diasAntes:1 (ejemplo: "el 5... y el día antes" → alarma con diaMes:5 + alarma con diaMes:5,diasAntes:1)
+- "unos días antes" → usa diasAntes:3 (2-3 días antes)
 - Múltiples fechas → {"esAlarma":true,"multiple":true,"alarmas":[...]}
 
 FORMATO:
