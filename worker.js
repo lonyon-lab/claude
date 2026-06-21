@@ -968,6 +968,7 @@ export default {
 
     const alarmas = await leerAlarmas(env);
     let huboCambios = false;
+    const idsAEliminar = new Set(); // 🆕 ids de alarmas únicas que ya sonaron
 
     for (const alarma of alarmas) {
       if (horaActual !== parseInt(alarma.hora) || minutosActuales !== parseInt(alarma.minuto)) continue;
@@ -984,12 +985,16 @@ export default {
       if (alarma.tipo === "semanal") textoAlarma += `\n\n🔄 <i>(Aviso semanal)</i>`;
 
       const enviado = await enviarAlarma(env.TELEGRAM_TOKEN, env.MY_TELEGRAM_ID, alarma, textoAlarma);
-      if (enviado) { alarma.ultimaEnviada = hoyStr; huboCambios = true; }
+      if (enviado) {
+        alarma.ultimaEnviada = hoyStr;
+        huboCambios = true;
+        if (alarma.tipo === "unica") idsAEliminar.add(alarma.id); // 🆕 las únicas se borran tras sonar
+      }
     }
 
     if (huboCambios) {
-      const hoyStr = `${ahora.toDateString()}_${horaActual}_${minutosActuales}`;
-      await guardarAlarmas(env, alarmas.filter(a => !(a.tipo === "unica" && a.ultimaEnviada === hoyStr)));
+      // 🆕 Eliminar las únicas que ya sonaron (por id; antes fallaba por desajuste "07" vs "7")
+      await guardarAlarmas(env, alarmas.filter(a => !idsAEliminar.has(a.id)));
     }
   }
 };
