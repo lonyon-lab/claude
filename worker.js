@@ -4,7 +4,8 @@
 // ✅ Cubre TODAS las variaciones comunes: madrugada/tarde/noche/mediodía
 // ✅ IA mejorada con mejor prompt y temperatura 0.3
 // ✅ Comando /debug_ia para testing sin crear alarmas
-// ✅ Whisper mejorado con language="es", temperature=0, task="transcribe"
+// ✅ Transcripción de voz con AssemblyAI (language_code="es") en lugar de Whisper
+//    Requiere la variable/secret ASSEMBLYAI_API_KEY en Cloudflare
 // ✅ TODOS los botones, callbacks y QR intactos
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -19,6 +20,8 @@ const FOTO_POR_DEFECTO = "https://images.unsplash.com/photo-1579546929518-9e396f
 const NOMBRES_MESES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
 const DIAS_POR_MES  = [31,28,31,30,31,30,31,31,30,31,30,31];
 const CLAVE_ALARMAS = "alarmas";
+const NOMBRES_DIAS  = ["Domingo","Lunes","Martes","Miércoles","Jueves","Viernes","Sábado"];
+const KEYCAPS       = ["1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣","🔟"];
 
 const PALABRAS_TIEMPO = [
   "lunes","martes","miércoles","miercoles","jueves","viernes","sábado","sabado","domingo",
@@ -279,7 +282,28 @@ function detectarAmbiguedadManana(texto, ahora) {
 }
 
 // ─── REGEX: tiempos relativos ─────────────────────────────────────────────────
-function detectarTiempoRelativo(texto) {
+// ─── 🆕 FRANJA HORARIA (AM/PM) ────────────────────────────────────────────────
+// Decide si una hora explícita (1-11) es clara o ambigua.
+// - Con marcador "de la tarde/noche" → PM (suma 12)
+// - Con marcador "de la mañana/madrugada" o contexto de mañana → AM literal
+// - Sin marcador → ambigua: el bot debe preguntar
+function resolverFranjaHoraria(h, marcadores, nota) {
+  const esTarde   = /(de|por)\s+la\s+tarde|(de|por)\s+la\s+noche|\bp\.?\s?m\.?\b/i.test(marcadores);
+  const esManana  = /(de|por)\s+la\s+ma[ñn]ana|madrugada|\ba\.?\s?m\.?\b/i.test(marcadores);
+  const ctxManana = /despert|desayun|levantar|amanecer|misa/i.test(nota || "");
+
+  if (h >= 1 && h <= 11) {
+    if (esTarde)             return { hora: h + 12, ambigua: false };
+    if (esManana || ctxManana) return { hora: h,    ambigua: false };
+    return { hora: h, ambigua: true }; // sin pistas → preguntar
+  }
+  return { hora: h, ambigua: false }; // 0 y 12-23 no son ambiguas
+}
+
+function detectarTiempoRelativo(texto, textoOriginal) {
+  // 🆕 Los marcadores am/pm se buscan en el texto ORIGINAL, porque la
+  //    normalización ya convierte "9 de la mañana" → "09:00" (perdiendo el marcador).
+  const original = (textoOriginal || texto).toLowerCase();
   const normalizado = texto.toLowerCase()
     .replace(/dentr[oa]\s*e\s+/g, 'dentro de ')
     .replace(/dento\s+de\s+/g,    'dentro de ')
@@ -382,6 +406,16 @@ function detectarTiempoRelativo(texto) {
   // ── "hoy" con hora explícita ──────────────────────────────────────────────
   } else if (/\bhoy\b/.test(normalizado)) {
     diasASumar = 0;
+  // ── 🆕 Día de la semana por nombre (ej: "el lunes a las 4 y 37") ───────────
+  //    Se excluye "todos los"/"cada" para que las alarmas semanales las maneje la IA.
+  } else if (/\b(lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[aá]bado|sabado|domingo)\b/.test(normalizado)
+             && !/todos\s+los|todas\s+las|cada\b/.test(normalizado)) {
+    const mapaDias = { domingo:0, lunes:1, martes:2, "miércoles":3, miercoles:3, jueves:4, viernes:5, "sábado":6, sabado:6 };
+    const md = normalizado.match(/\b(lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[aá]bado|sabado|domingo)\b/);
+    const objetivo = mapaDias[md[1]];
+    let diff = (objetivo - ahora.getDay() + 7) % 7;
+    if (diff === 0) diff = 7; // si hoy es ese día, se entiende el de la próxima semana
+    diasASumar = diff;
   }
 
   if (minutosASumar === null && diasASumar === null) return null;
@@ -406,9 +440,11 @@ function detectarTiempoRelativo(texto) {
   const matchHHMM  = texto.match(/(\d{1,2}):(\d{2})/);
   const matchAlasX = texto.match(/a\s+las\s+(\d{1,2})(?:\s+y\s+(media|cuarto|(\d{1,2})))?/i);
 
+  let horaExplicita = false;
   if (matchHHMM) {
     hora   = String(parseInt(matchHHMM[1])).padStart(2,'0');
     minuto = matchHHMM[2];
+    horaExplicita = true;
   } else if (matchAlasX) {
     hora = String(parseInt(matchAlasX[1])).padStart(2,'0');
     if (!matchAlasX[2]) {
@@ -420,30 +456,57 @@ function detectarTiempoRelativo(texto) {
     } else if (matchAlasX[3]) {
       minuto = String(parseInt(matchAlasX[3])).padStart(2,'0');
     }
+    horaExplicita = true;
+  }
+
+  // 🆕 Nota explícita: si el usuario dice "nota ..." o "nota: ...", usar lo que sigue
+  let notaExplicita = null;
+  const matchNota = texto.match(/\bnota\b\s*[:\-]?\s*(.+)$/i);
+  if (matchNota && matchNota[1].trim()) {
+    notaExplicita = matchNota[1].replace(/[.\s]+$/, '').trim();
   }
 
   // Nota limpia
   const notaLimpia = texto
+    .replace(/\bnota\b\s*[:\-]?\s*.*$/i, '')          // 🆕 quitar "nota ..." del final
     .replace(/(?:dentr[oa]\s*e?\s+|dento\s+de\s+|en\s+|pasad[ao]s?\s+)\s*(?:un\s+par\s+de\s+|unos\s+|\d+\s+o\s+\d+\s+|una\s+|dos\s+|tres\s+|\d+\s+)?(?:media\s+hora|hora[s]?\s+y\s+media|hora[s]?|hours?|minutos?|minutes?|min[s]?|d[ií]as?|days?|semanas?|weeks?)/gi, '')
     .replace(/(?:pasado\s+)?ma[ñn]ana/gi, '')
     .replace(/hoy/gi, '')
+    .replace(/\b(lunes|martes|mi[eé]rcoles|miercoles|jueves|viernes|s[aá]bado|sabado|domingo)\b/gi, '') // 🆕 día de la semana
     .replace(/a\s+las\s+\d{1,2}(?:[:：]\d{2}|\s+y\s+(?:media|cuarto|\d{1,2}))?/gi, '')
+    .replace(/quiero\s+que/gi, '')                     // 🆕
+    .replace(/\b(me\s+)?av[ií]s\w*/gi, '')             // 🆕 avísame/avises/avisa
     .replace(/alarma/gi, '')
     .replace(/pon(?:me|e)?/gi, '')
-    .replace(/recuerd[ao]me/gi, '')
+    .replace(/recu[eé]rd[ao]me/gi, '')                 // 🆕 recuérdame/recuerdame
     .replace(/av[ií]same/gi, '')
     .replace(/despertador/gi, 'Despertador')
     .replace(/\d+\s+de\s+[a-záéíóúñ]+/gi, '')
+    .replace(/\b(de\s+)?(la\s+)?(madrugada|ma[ñn]ana|tarde|noche)\b/gi, '') // 🆕 restos de franja
+    .replace(/\bde\s+de\b/gi, '')                      // 🆕 "de de"
+    .replace(/\ba\s+las\b/gi, '')                       // 🆕 restos de "a las"
+    .replace(/\s{2,}/g, ' ')                            // 🆕 colapsar espacios
     .replace(/^[,\s]+|[,\s]+$/g, '')
+    .replace(/^(el|la|los|las|al)\s+/i, '')            // 🆕 artículo inicial sobrante
     .trim() || "Recordatorio";
 
+  const notaFinal = notaExplicita || notaLimpia;
+
+  // 🆕 Resolver franja horaria (am/pm) cuando la hora es explícita
+  let ambiguaFranja = false;
+  if (horaExplicita && hora !== null) {
+    const fr = resolverFranjaHoraria(parseInt(hora), original, notaFinal);
+    hora = String(fr.hora).padStart(2, '0');
+    ambiguaFranja = fr.ambigua;
+  }
+
   if (hora === null) {
-    const def = horaDefectoPorNota(notaLimpia);
+    const def = horaDefectoPorNota(notaFinal);
     hora   = def.hora;
     minuto = def.minuto;
   }
 
-  return { hora, minuto, diaMes: dia, mes, nota: notaLimpia };
+  return { hora, minuto, diaMes: dia, mes, nota: notaFinal, ambiguaFranja };
 }
 
 function pareceTenerIntencionDeTiempo(texto) {
@@ -477,6 +540,148 @@ async function enviarAlarma(token, chatId, alarma, textoAlarma) {
   }
   if (await enviarFotoPorUrl(token, chatId, FOTO_POR_DEFECTO, textoAlarma)) return true;
   return await enviarTextoSimple(token, chatId, textoAlarma);
+}
+
+// ─── 🆕 CUENTA ATRÁS ──────────────────────────────────────────────────────────
+// Devuelve un texto tipo "⏳ Faltan 2 días, 5 horas y 10 minutos" calculando el
+// tiempo restante hasta que suene la alarma (zona horaria Atlantic/Canary).
+function calcularCuentaAtras(alarma) {
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const hh = parseInt(alarma.hora);
+  const mm = parseInt(alarma.minuto);
+  let target;
+
+  if (alarma.tipo === "semanal") {
+    const diaObjetivo = Number(alarma.diaSemana);
+    target = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), hh, mm, 0, 0);
+    let diff = (diaObjetivo - ahora.getDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= ahora.getTime()) diff = 7; // hoy pero ya pasó → próxima semana
+    target.setDate(target.getDate() + diff);
+  } else {
+    target = new Date(ahora.getFullYear(), Number(alarma.mes) - 1, Number(alarma.diaMes), hh, mm, 0, 0);
+    if (target.getTime() < ahora.getTime()) target.setFullYear(target.getFullYear() + 1); // ya pasó este año
+  }
+
+  let ms = target.getTime() - ahora.getTime();
+  if (ms < 0) ms = 0;
+
+  const totalMin = Math.round(ms / 60000);
+  const dias    = Math.floor(totalMin / 1440);
+  const horas   = Math.floor((totalMin % 1440) / 60);
+  const minutos = totalMin % 60;
+
+  const partes = [];
+  if (dias > 0)    partes.push(`${dias} ${dias === 1 ? "día" : "días"}`);
+  if (horas > 0)   partes.push(`${horas} ${horas === 1 ? "hora" : "horas"}`);
+  if (minutos > 0) partes.push(`${minutos} ${minutos === 1 ? "minuto" : "minutos"}`);
+
+  if (partes.length === 0) return "⏳ <b>Suena en menos de 1 minuto</b>";
+
+  let texto;
+  if (partes.length === 1)      texto = partes[0];
+  else if (partes.length === 2) texto = `${partes[0]} y ${partes[1]}`;
+  else                          texto = `${partes[0]}, ${partes[1]} y ${partes[2]}`;
+
+  return `⏳ <b>Faltan ${texto}</b>`;
+}
+
+// ─── 🆕 HELPERS DE VISTA (Opción A: menú interactivo en un solo mensaje) ───────
+// Cuenta atrás en formato corto para la lista: "1d 19h" / "5h 10m" / "3m" / "¡ya!"
+function cuentaAtrasCorta(alarma) {
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const hh = parseInt(alarma.hora), mm = parseInt(alarma.minuto);
+  let target;
+  if (alarma.tipo === "semanal") {
+    target = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate(), hh, mm, 0, 0);
+    let diff = (Number(alarma.diaSemana) - ahora.getDay() + 7) % 7;
+    if (diff === 0 && target.getTime() <= ahora.getTime()) diff = 7;
+    target.setDate(target.getDate() + diff);
+  } else {
+    target = new Date(ahora.getFullYear(), Number(alarma.mes) - 1, Number(alarma.diaMes), hh, mm, 0, 0);
+    if (target.getTime() < ahora.getTime()) target.setFullYear(target.getFullYear() + 1);
+  }
+  const totalMin = Math.round((target.getTime() - ahora.getTime()) / 60000);
+  if (totalMin <= 0) return "¡ya!";
+  const d = Math.floor(totalMin / 1440), h = Math.floor((totalMin % 1440) / 60), m = totalMin % 60;
+  if (d > 0) return `${d}d ${h}h`;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+// Texto de fecha de una alarma (para la ficha de detalle)
+function nombreFechaAlarma(al) {
+  if (al.tipo === "semanal") return `🔄 Todos los <b>${NOMBRES_DIAS[al.diaSemana]}</b>`;
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+  if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
+  return `📅 <b>${NOMBRES_DIAS[fecha.getDay()]} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
+}
+
+// Ordena: únicas por proximidad y luego las semanales
+function ordenarAlarmas(alarmas) {
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const unicas = alarmas.filter(a => a.tipo === "unica").sort((a, b) => {
+    const fa = new Date(ahora.getFullYear(), a.mes - 1, a.diaMes, parseInt(a.hora), parseInt(a.minuto));
+    const fb = new Date(ahora.getFullYear(), b.mes - 1, b.diaMes, parseInt(b.hora), parseInt(b.minuto));
+    if (fa < ahora) fa.setFullYear(fa.getFullYear() + 1);
+    if (fb < ahora) fb.setFullYear(fb.getFullYear() + 1);
+    return fa.getTime() - fb.getTime();
+  });
+  const semanales = alarmas.filter(a => a.tipo === "semanal");
+  return [...unicas, ...semanales];
+}
+
+// Construye la vista de LISTA: texto compacto numerado + teclado de números
+function construirVistaLista(alarmas, pagina = 0) {
+  const PAGE = 10;
+  const ordenadas = ordenarAlarmas(alarmas);
+  const totalPag = Math.max(1, Math.ceil(ordenadas.length / PAGE));
+  pagina = Math.max(0, Math.min(pagina, totalPag - 1));
+  const slice = ordenadas.slice(pagina * PAGE, pagina * PAGE + PAGE);
+
+  let texto = `📋 <b>TUS ALARMAS</b> (${alarmas.length})`;
+  if (totalPag > 1) texto += ` · pág. ${pagina + 1}/${totalPag}`;
+  texto += `\n👇 Pulsa el <b>número</b> para gestionarla.\n`;
+
+  const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
+  const teclado = [];
+  let fila = [];
+  slice.forEach((al, i) => {
+    const emoji = KEYCAPS[i] || `${i + 1}`;
+    let cabecera;
+    if (al.tipo === "semanal") {
+      cabecera = `🔄<b>${NOMBRES_DIAS[al.diaSemana].slice(0, 3)}</b> ⏰ ${al.hora}:${al.minuto}`;
+    } else {
+      const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
+      if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
+      const dia = NOMBRES_DIAS[fecha.getDay()].slice(0, 3);
+      cabecera = `📅${dia} <b>${al.diaMes} ${NOMBRES_MESES[al.mes - 1].slice(0, 3)}</b> ⏰ ${al.hora}:${al.minuto}`;
+    }
+    texto += `\n\n${emoji} ${cabecera} · ⏳${cuentaAtrasCorta(al)} · ${escapeHTML(al.nota)}`;
+    // Botonera con números normales (1, 2, 3…)
+    fila.push({ text: `${i + 1}`, callback_data: `alarma_ver:${al.id}` });
+    if (fila.length === 5) { teclado.push(fila); fila = []; }
+  });
+  if (fila.length) teclado.push(fila);
+
+  // Navegación: solo flechas de página cuando aplican (sin botón de refrescar)
+  const nav = [];
+  if (pagina > 0) nav.push({ text: "◀️ Anterior", callback_data: `lista:${pagina - 1}` });
+  if (pagina < totalPag - 1) nav.push({ text: "Siguiente ▶️", callback_data: `lista:${pagina + 1}` });
+  if (nav.length) teclado.push(nav);
+  teclado.push([{ text: "🔍 Buscar", callback_data: "buscar_alarma" }]);
+
+  return { texto, teclado };
+}
+
+// Construye la vista de FICHA (detalle de una alarma) + acciones
+function construirFichaAlarma(alarma, prefijo = "") {
+  const texto = `${prefijo}${nombreFechaAlarma(alarma)} a las <b>${alarma.hora}:${alarma.minuto}</b>\n${calcularCuentaAtras(alarma)}\n📝 <i>${escapeHTML(alarma.nota)}</i>`;
+  const teclado = [
+    [{ text: "✏️ Editar nota", callback_data: `editar_nota:${alarma.id}` }, { text: "🕐 Hora/Fecha", callback_data: `editar_fecha:${alarma.id}` }],
+    [{ text: "🗑️ Borrar", callback_data: `preguntar_borrar:${alarma.id}` }, { text: "◀️ Lista", callback_data: `lista:0` }]
+  ];
+  return { texto, teclado };
 }
 
 // ─── GUARDAR ALARMA DESDE IA ──────────────────────────────────────────────────
@@ -520,8 +725,8 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
     const resumen = nuevas.map(a => {
       const fecha = new Date(new Date().getFullYear(), a.mes - 1, a.diaMes);
       const diaSemana = nombresDias[fecha.getDay()].toLowerCase();
-      return `📅 <b>El ${diaSemana} ${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>`;
-    }).join('\n');
+      return `📅 <b>El ${diaSemana} ${a.diaMes} de ${NOMBRES_MESES[a.mes - 1]}</b> a las <b>${a.hora}:${a.minuto}</b>\n${calcularCuentaAtras(a)}`;
+    }).join('\n\n');
     
     // 🆕 Botones para editar cada alarma
     const botones = nuevas.map(a => [{ 
@@ -568,7 +773,7 @@ async function guardarAlarmaDesdeIA(datos, env, chatId, msgId) {
   const botones = [[{ text: "✏️ Editar descripción", callback_data: `editar_desc:${alarma.id}` }]];
   
   await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
+    `✅ <b>¡Alarma guardada!</b>\n\n${fechaTxt}\n⏰ <b>${alarma.hora}:${alarma.minuto}</b>\n${calcularCuentaAtras(alarma)}\n📝 <i>${escapeHTML(alarma.nota)}</i>`,
     botones
   );
 }
@@ -665,6 +870,68 @@ async function desplegarPanelNota(token, chatId, messageId) {
   await editMessage(token, chatId, messageId, "✍️ <b>Selecciona o escribe la nota del recordatorio:</b>", filas);
 }
 
+// ─── 🎤 TRANSCRIPCIÓN CON ASSEMBLYAI ──────────────────────────────────────────
+// Flujo AssemblyAI: 1) subir el audio  2) crear la transcripción  3) hacer polling
+// hasta que el estado sea "completed". Devuelve el texto transcrito (o "" si falla).
+async function transcribirConAssemblyAI(audioBuffer, apiKey) {
+  const BASE = "https://api.assemblyai.com/v2";
+  const headers = { authorization: apiKey };
+
+  // 1) Subir el audio (cuerpo binario directo)
+  const uploadRes = await fetch(`${BASE}/upload`, {
+    method: "POST",
+    headers,
+    body: audioBuffer
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`AssemblyAI upload falló: ${uploadRes.status} ${await uploadRes.text()}`);
+  }
+  const { upload_url } = await uploadRes.json();
+  if (!upload_url) throw new Error("AssemblyAI no devolvió upload_url");
+
+  // 2) Crear la transcripción en español
+  const createRes = await fetch(`${BASE}/transcript`, {
+    method: "POST",
+    headers: { ...headers, "content-type": "application/json" },
+    body: JSON.stringify({
+      audio_url: upload_url,
+      language_code: "es",       // 🆕 Español
+      punctuate: true,
+      format_text: true
+    })
+  });
+  if (!createRes.ok) {
+    throw new Error(`AssemblyAI transcript falló: ${createRes.status} ${await createRes.text()}`);
+  }
+  const created = await createRes.json();
+  const transcriptId = created.id;
+  if (!transcriptId) throw new Error("AssemblyAI no devolvió id de transcripción");
+
+  // 3) Polling hasta "completed" (máx ~55s para no exceder límites del Worker)
+  const inicio = Date.now();
+  const TIMEOUT_MS = 55000;
+  const INTERVALO_MS = 2000;
+
+  while (Date.now() - inicio < TIMEOUT_MS) {
+    const pollRes = await fetch(`${BASE}/transcript/${transcriptId}`, { headers });
+    if (!pollRes.ok) {
+      throw new Error(`AssemblyAI polling falló: ${pollRes.status} ${await pollRes.text()}`);
+    }
+    const data = await pollRes.json();
+
+    if (data.status === "completed") {
+      return (data.text || "").trim();
+    }
+    if (data.status === "error") {
+      throw new Error(`AssemblyAI error: ${data.error}`);
+    }
+    // status "queued" o "processing" → esperar y reintentar
+    await new Promise(r => setTimeout(r, INTERVALO_MS));
+  }
+
+  throw new Error("AssemblyAI: tiempo de espera agotado (timeout)");
+}
+
 // ─── EXPORT DEFAULT ───────────────────────────────────────────────────────────
 export default {
   async fetch(request, env) {
@@ -701,6 +968,7 @@ export default {
 
     const alarmas = await leerAlarmas(env);
     let huboCambios = false;
+    const idsAEliminar = new Set(); // 🆕 ids de alarmas únicas que ya sonaron
 
     for (const alarma of alarmas) {
       if (horaActual !== parseInt(alarma.hora) || minutosActuales !== parseInt(alarma.minuto)) continue;
@@ -717,12 +985,16 @@ export default {
       if (alarma.tipo === "semanal") textoAlarma += `\n\n🔄 <i>(Aviso semanal)</i>`;
 
       const enviado = await enviarAlarma(env.TELEGRAM_TOKEN, env.MY_TELEGRAM_ID, alarma, textoAlarma);
-      if (enviado) { alarma.ultimaEnviada = hoyStr; huboCambios = true; }
+      if (enviado) {
+        alarma.ultimaEnviada = hoyStr;
+        huboCambios = true;
+        if (alarma.tipo === "unica") idsAEliminar.add(alarma.id); // 🆕 las únicas se borran tras sonar
+      }
     }
 
     if (huboCambios) {
-      const hoyStr = `${ahora.toDateString()}_${horaActual}_${minutosActuales}`;
-      await guardarAlarmas(env, alarmas.filter(a => !(a.tipo === "unica" && a.ultimaEnviada === hoyStr)));
+      // 🆕 Eliminar las únicas que ya sonaron (por id; antes fallaba por desajuste "07" vs "7")
+      await guardarAlarmas(env, alarmas.filter(a => !idsAEliminar.has(a.id)));
     }
   }
 };
@@ -766,7 +1038,11 @@ async function handleCallback(cb, env) {
   }
   else if (data.startsWith("set_dia_sem:")) {
     const dia = data.split(":")[1];
-    await env.ALARMAS_KV.put(`temp_${chatId}`, JSON.stringify({ tipo: "semanal", diaSemana: dia }));
+    // 🆕 Fusionar en vez de sobrescribir (preserva id/nota/editando al editar)
+    const config = await env.ALARMAS_KV.get(`temp_${chatId}`, { type: "json" }) || {};
+    config.tipo = "semanal";
+    config.diaSemana = dia;
+    await env.ALARMAS_KV.put(`temp_${chatId}`, JSON.stringify(config));
     await desplegarPanelHoras(env.TELEGRAM_TOKEN, chatId, messageId, false);
   }
   else if (data === "volver_a_fecha") {
@@ -807,6 +1083,35 @@ async function handleCallback(cb, env) {
     const config = await env.ALARMAS_KV.get(`temp_${chatId}`, { type: "json" });
     if (!config) return;
     config.minuto = minutoCompleto.toString().padStart(2,'0');
+
+    // 🆕 Modo edición: guardar sobre la alarma existente sin volver a pedir la nota
+    if (config.editando) {
+      const alarmas = await leerAlarmas(env);
+      const idx = alarmas.findIndex(a => a.id === config.id);
+      if (idx >= 0) {
+        const a = alarmas[idx];
+        a.tipo   = config.tipo;
+        a.hora   = config.hora;
+        a.minuto = config.minuto;
+        if (config.tipo === "unica") {
+          a.diaMes = config.diaMes; a.mes = config.mes;
+          delete a.diaSemana;
+        } else {
+          a.diaSemana = config.diaSemana;
+          delete a.diaMes; delete a.mes;
+        }
+        await guardarAlarmas(env, alarmas);
+        await env.ALARMAS_KV.delete(`temp_${chatId}`);
+        const vista = construirFichaAlarma(a, "✅ <b>¡Hora/fecha actualizada!</b>\n\n");
+        await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, vista.texto, vista.teclado);
+      } else {
+        await env.ALARMAS_KV.delete(`temp_${chatId}`);
+        await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ La alarma ya no existe.", [[{ text: "◀️ Lista", callback_data: "lista:0" }]]);
+      }
+      return;
+    }
+
+    // Creación (comportamiento original)
     config.id = Date.now().toString();
     config.nota = "Recordatorio sin nombre";
     config.fotoUrl = FOTO_POR_DEFECTO;
@@ -863,6 +1168,58 @@ async function handleCallback(cb, env) {
     
     await guardarAlarmaDesdeIA(pendiente, env, chatId, messageId);
   }
+  else if (data === "franja:am" || data === "franja:pm") {    // 🆕 Resolver hora ambigua (am/pm) elegida por el usuario
+    const pend = await env.ALARMAS_KV.get(`pendiente_franja:${chatId}`, { type: "json" });
+    if (!pend) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ La operación expiró. Vuelve a escribir el recordatorio.", null);
+      return;
+    }
+    await env.ALARMAS_KV.delete(`pendiente_franja:${chatId}`);
+    const hora = data === "franja:pm" ? pend.horaPM : pend.horaAM;
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, `👍 Hora seleccionada: <b>${hora}:${pend.minuto}</b>`, null);
+    await guardarAlarmaDesdeIA({
+      esAlarma: true, tipo: "unica",
+      diaMes: pend.diaMes, mes: pend.mes,
+      hora, minuto: pend.minuto, nota: pend.nota
+    }, env, chatId, messageId);
+  }
+  else if (data.startsWith("lista:")) {
+    // 🆕 Volver/refrescar/paginar la lista de alarmas (Opción A)
+    const pag = parseInt(data.split(":")[1]) || 0;
+    const alarmas = await leerAlarmas(env);
+    if (alarmas.length === 0) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "🤷‍♂️ No tienes ninguna alarma configurada.", null);
+      return;
+    }
+    const vista = construirVistaLista(alarmas, pag);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, vista.texto, vista.teclado);
+  }
+  else if (data.startsWith("alarma_ver:")) {
+    // 🆕 Ficha de detalle de una alarma
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const al = alarmas.find(a => a.id === id);
+    if (!al) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", [[{ text: "◀️ Lista", callback_data: "lista:0" }]]);
+      return;
+    }
+    const vista = construirFichaAlarma(al);
+    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, vista.texto, vista.teclado);
+  }
+  else if (data.startsWith("editar_fecha:")) {
+    // 🆕 Editar hora/fecha reutilizando la botonera de fecha única / semanal
+    const id = data.split(":")[1];
+    const alarmas = await leerAlarmas(env);
+    const al = alarmas.find(a => a.id === id);
+    if (!al) {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "❌ Esta alarma ya no existe.", [[{ text: "◀️ Lista", callback_data: "lista:0" }]]);
+      return;
+    }
+    // Cargar la alarma en el temporal con marca de edición (preserva id, nota, foto)
+    await env.ALARMAS_KV.put(`temp_${chatId}`, JSON.stringify({ ...al, editando: true }));
+    if (al.tipo === "semanal") await desplegarPanelDiasSemana(env.TELEGRAM_TOKEN, chatId, messageId);
+    else await desplegarPanelMeses(env.TELEGRAM_TOKEN, chatId, messageId);
+  }
   else if (data.startsWith("preguntar_borrar:")) {
     const id      = data.split(":")[1];
     const alarmas = await leerAlarmas(env);
@@ -879,8 +1236,14 @@ async function handleCallback(cb, env) {
   else if (data.startsWith("confirmar_borrar:")) {
     const id = data.split(":")[1];
     const alarmas = await leerAlarmas(env);
-    await guardarAlarmas(env, alarmas.filter(a => a.id !== id));
-    await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "🗑️ Alarma eliminada correctamente.", null);
+    const restantes = alarmas.filter(a => a.id !== id);
+    await guardarAlarmas(env, restantes);
+    if (restantes.length > 0) {
+      const vista = construirVistaLista(restantes, 0);
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, `🗑️ <b>Alarma eliminada.</b>\n\n${vista.texto}`, vista.teclado);
+    } else {
+      await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "🗑️ Alarma eliminada. Ya no tienes alarmas.", null);
+    }
   }
   else if (data === "cancelar_borrar") {
     await editMessage(env.TELEGRAM_TOKEN, chatId, messageId, "↩️ Borrado cancelado. Usa /ver para listarlas de nuevo.", null);
@@ -899,7 +1262,7 @@ async function handleCallback(cb, env) {
             return `📅 El <b>${diaSemana} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
           })();
       await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n📝 <i>${escapeHTML(al.nota)}</i>`,
+        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n${calcularCuentaAtras(al)}\n📝 <i>${escapeHTML(al.nota)}</i>`,
         [
           [{ text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` }],
           [{ text: "❌ Borrar", callback_data: `preguntar_borrar:${al.id}` }]
@@ -1059,7 +1422,7 @@ async function guardarNotaYFinalizar(env, chatId, messageId, nota) {
   
   // 🆕 Agregar botón de editar descripción
   await editMessage(env.TELEGRAM_TOKEN, chatId, messageId,
-    `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n📝 <i>${escapeHTML(config.nota)}</i>`,
+    `✅ <b>¡Alarma guardada!</b>\n\n${resumen}\n⏰ <b>${config.hora}:${config.minuto}</b>\n${calcularCuentaAtras(config)}\n📝 <i>${escapeHTML(config.nota)}</i>`,
     [[{ text: "✏️ Editar descripción", callback_data: `editar_desc:${config.id}` }]]
   );
 }
@@ -1098,17 +1461,18 @@ async function processMessage(msg, env) {
       const audioRes = await fetch(audioUrl);
       const audioBuffer = await audioRes.arrayBuffer();
       
-      // Usar Cloudflare AI Whisper con configuración mejorada
+      // 🆕 Validar que existe la API key de AssemblyAI
+      if (!env.ASSEMBLYAI_API_KEY) {
+        console.error("❌ Falta el secret ASSEMBLYAI_API_KEY");
+        await sendText(env.TELEGRAM_TOKEN, chatId, msgId,
+          "❌ Configuración incompleta: falta la clave de AssemblyAI.");
+        return;
+      }
+      
+      // 🆕 Transcribir con AssemblyAI
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🎤 Transcribiendo audio...");
       
-      const transcription = await env.AI.run("@cf/openai/whisper", {
-        audio: Array.from(new Uint8Array(audioBuffer)),
-        language: "es",           // 🆕 Especificar español
-        temperature: 0.0,         // 🆕 Más determinístico = más preciso
-        task: "transcribe"        // 🆕 Tarea explícita (no traducción)
-      });
-      
-      const textoTranscrito = (transcription?.text || transcription?.vtt || "").trim();
+      const textoTranscrito = await transcribirConAssemblyAI(audioBuffer, env.ASSEMBLYAI_API_KEY);
       
       if (!textoTranscrito || textoTranscrito.length === 0) {
         await sendText(env.TELEGRAM_TOKEN, chatId, msgId, 
@@ -1167,139 +1531,10 @@ async function processMessage(msg, env) {
       await sendText(env.TELEGRAM_TOKEN, chatId, msgId, "🤷‍♂️ No tienes ninguna alarma configurada.");
       return;
     }
-    
-    // 🆕 Ordenar y agrupar alarmas
-    const ahora = new Date(new Date().toLocaleString("en-US", { timeZone: "Atlantic/Canary" }));
-    const hoyInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
-    
-    // Separar semanales y únicas
-    const semanales = alarmas.filter(a => a.tipo === "semanal");
-    const unicas = alarmas.filter(a => a.tipo === "unica");
-    
-    // Ordenar únicas por proximidad
-    unicas.sort((a, b) => {
-      const fechaA = new Date(ahora.getFullYear(), a.mes - 1, a.diaMes, a.hora, a.minuto);
-      const fechaB = new Date(ahora.getFullYear(), b.mes - 1, b.diaMes, b.hora, b.minuto);
-      // Si la fecha ya pasó este año, considerar año siguiente
-      if (fechaA < ahora) fechaA.setFullYear(fechaA.getFullYear() + 1);
-      if (fechaB < ahora) fechaB.setFullYear(fechaB.getFullYear() + 1);
-      return fechaA.getTime() - fechaB.getTime();
-    });
-    
-    // Agrupar por categorías temporales
-    const grupos = {
-      hoy: [],
-      manana: [],
-      estaSemana: [],
-      esteMes: [],
-      proximosMeses: []
-    };
-    
-    const mananaInicio = new Date(hoyInicio.getTime() + 86400000);
-    const finSemana = new Date(hoyInicio.getTime() + 7 * 86400000);
-    const finMes = new Date(ahora.getFullYear(), ahora.getMonth() + 1, 0);
-    
-    for (const al of unicas) {
-      const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
-      if (fecha < ahora) fecha.setFullYear(fecha.getFullYear() + 1);
-      
-      if (fecha.toDateString() === hoyInicio.toDateString()) {
-        grupos.hoy.push(al);
-      } else if (fecha.toDateString() === mananaInicio.toDateString()) {
-        grupos.manana.push(al);
-      } else if (fecha < finSemana) {
-        grupos.estaSemana.push(al);
-      } else if (fecha <= finMes) {
-        grupos.esteMes.push(al);
-      } else {
-        grupos.proximosMeses.push(al);
-      }
-    }
-    
-    // Construir mensaje agrupado
-    let mensaje = `📋 <b>TUS ALARMAS</b> (${alarmas.length} total)`;
-    let contador = 0;
-    const limite = 10;
-    
-    // HOY
-    if (grupos.hoy.length > 0) {
-      mensaje += `\n\n📅 <b>HOY</b> (${grupos.hoy.length})`;
-      for (const al of grupos.hoy) {
-        if (contador >= limite) break;
-        const diaSemana = nombresDias[new Date(ahora.getFullYear(), al.mes - 1, al.diaMes).getDay()].toLowerCase();
-        mensaje += `\n  • <b>${al.hora}:${al.minuto}</b> - ${escapeHTML(al.nota)}`;
-        contador++;
-      }
-    }
-    
-    // MAÑANA
-    if (grupos.manana.length > 0 && contador < limite) {
-      mensaje += `\n\n📅 <b>MAÑANA</b> (${grupos.manana.length})`;
-      for (const al of grupos.manana) {
-        if (contador >= limite) break;
-        mensaje += `\n  • <b>${al.hora}:${al.minuto}</b> - ${escapeHTML(al.nota)}`;
-        contador++;
-      }
-    }
-    
-    // ESTA SEMANA
-    if (grupos.estaSemana.length > 0 && contador < limite) {
-      mensaje += `\n\n📅 <b>ESTA SEMANA</b> (${grupos.estaSemana.length})`;
-      for (const al of grupos.estaSemana) {
-        if (contador >= limite) break;
-        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
-        const diaSemana = nombresDias[fecha.getDay()];
-        mensaje += `\n  • <b>${diaSemana} ${al.diaMes}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
-        contador++;
-      }
-    }
-    
-    // ESTE MES
-    if (grupos.esteMes.length > 0 && contador < limite) {
-      mensaje += `\n\n📅 <b>ESTE MES</b> (${grupos.esteMes.length})`;
-      for (const al of grupos.esteMes) {
-        if (contador >= limite) break;
-        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
-        const diaSemana = nombresDias[fecha.getDay()];
-        mensaje += `\n  • <b>${diaSemana} ${al.diaMes}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
-        contador++;
-      }
-    }
-    
-    // PRÓXIMOS MESES
-    if (grupos.proximosMeses.length > 0 && contador < limite) {
-      mensaje += `\n\n📅 <b>PRÓXIMOS MESES</b> (${grupos.proximosMeses.length})`;
-      for (const al of grupos.proximosMeses) {
-        if (contador >= limite) break;
-        const fecha = new Date(ahora.getFullYear(), al.mes - 1, al.diaMes);
-        const diaSemana = nombresDias[fecha.getDay()];
-        mensaje += `\n  • <b>${diaSemana} ${al.diaMes} ${NOMBRES_MESES[al.mes - 1]}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
-        contador++;
-      }
-    }
-    
-    // SEMANALES
-    if (semanales.length > 0) {
-      mensaje += `\n\n🔄 <b>SEMANALES</b> (${semanales.length})`;
-      for (const al of semanales) {
-        if (contador >= limite) break;
-        mensaje += `\n  • <b>Todos los ${nombresDias[al.diaSemana]}</b> - ${al.hora}:${al.minuto} - ${escapeHTML(al.nota)}`;
-        contador++;
-      }
-    }
-    
-    // Botones
-    const botones = [];
-    if (alarmas.length > limite) {
-      mensaje += `\n\n<i>Mostrando ${contador} de ${alarmas.length} alarmas</i>`;
-      botones.push([{ text: "📋 Ver todas", callback_data: "ver_todas" }]);
-    }
-    botones.push([
-      { text: "🔍 Buscar", callback_data: "buscar_alarma" },
-      { text: "📆 Por mes", callback_data: "ver_por_mes" }
-    ]);
-    
-    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId, mensaje, botones);
+
+    // 🆕 Opción A: un solo mensaje con lista compacta numerada + teclado
+    const vista = construirVistaLista(alarmas, 0);
+    await sendTextConBotones(env.TELEGRAM_TOKEN, chatId, vista.texto, vista.teclado);
     return;
   }
 
@@ -1417,7 +1652,7 @@ async function processMessage(msg, env) {
             return `📅 El <b>${diaSemana} ${al.diaMes} de ${NOMBRES_MESES[al.mes - 1]}</b>`;
           })();
       await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
-        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n📝 <i>${escapeHTML(al.nota)}</i>`,
+        `${fechaTxt} a las <b>${al.hora}:${al.minuto}</b>\n${calcularCuentaAtras(al)}\n📝 <i>${escapeHTML(al.nota)}</i>`,
         [
           [{ text: "✏️ Editar nota", callback_data: `editar_nota:${al.id}` }],
           [{ text: "❌ Borrar", callback_data: `preguntar_borrar:${al.id}` }]
@@ -1479,7 +1714,7 @@ async function processMessage(msg, env) {
     console.log("📝 TEXTO NORMALIZADO:", textNormalizado); // 🆕 Log normalizado
     
     // Capa 1: Regex tiempo relativo (con texto normalizado)
-    const tiempoRelativo = detectarTiempoRelativo(textNormalizado);
+    const tiempoRelativo = detectarTiempoRelativo(textNormalizado, text);
     console.log("🔍 Regex resultado:", tiempoRelativo ? "DETECTADO" : "null"); // 🆕 Log
     
     if (tiempoRelativo) {
@@ -1491,6 +1726,28 @@ async function processMessage(msg, env) {
           multiple: true,
           alarmas: tiempoRelativo.fechas.map(f => ({ ...f, tipo: "unica" }))
         }, env, chatId, msgId);
+      } else if (tiempoRelativo.ambiguaFranja) {
+        // 🆕 Hora ambigua (sin marcador am/pm) → preguntar al usuario
+        const amH = tiempoRelativo.hora;
+        const pmH = String(parseInt(amH) + 12).padStart(2, '0');
+        const amInt = parseInt(amH), pmInt = parseInt(pmH);
+        const amLabel = amInt < 6 ? "madrugada" : "mañana";
+        const pmLabel = pmInt < 20 ? "tarde" : "noche";
+
+        await env.ALARMAS_KV.put(`pendiente_franja:${chatId}`, JSON.stringify({
+          tipo: "unica",
+          diaMes: tiempoRelativo.diaMes, mes: tiempoRelativo.mes,
+          minuto: tiempoRelativo.minuto, nota: tiempoRelativo.nota,
+          horaAM: amH, horaPM: pmH
+        }));
+
+        await sendTextConBotones(env.TELEGRAM_TOKEN, chatId,
+          `🤔 ¿A qué hora te refieres con las <b>${amInt}:${tiempoRelativo.minuto}</b>?\n📝 <i>${escapeHTML(tiempoRelativo.nota)}</i>`,
+          [[
+            { text: `🌙 ${amH}:${tiempoRelativo.minuto} (${amLabel})`, callback_data: "franja:am" },
+            { text: `☀️ ${pmH}:${tiempoRelativo.minuto} (${pmLabel})`, callback_data: "franja:pm" }
+          ]]
+        );
       } else {
         await guardarAlarmaDesdeIA({
           esAlarma: true, tipo: "unica",
